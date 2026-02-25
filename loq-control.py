@@ -272,6 +272,18 @@ class LOQControl(QWidget):
 
         root.addLayout(grid)
         root.addStretch()
+
+        footer = QLabel(
+            f'Made by ojee  \u2022  '
+            f'<a href="https://ojee.net" style="color: {TEXT_DIM};">ojee.net</a>')
+        footer.setFont(QFont(FONT, 8))
+        footer.setAlignment(Qt.AlignCenter)
+        footer.setOpenExternalLinks(True)
+        footer.setStyleSheet(
+            f'color: {TEXT_MUTED}; background: transparent; '
+            f'padding: 12px 0 4px 0;')
+        root.addWidget(footer)
+
         scroll.setWidget(container)
         outer.addWidget(scroll)
 
