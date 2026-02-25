@@ -15,7 +15,8 @@ from PyQt5.QtWidgets import (
     QFrame, QGridLayout, QSlider, QScrollArea, QMessageBox, QSizePolicy,
     QProgressBar, QSystemTrayIcon, QMenu, QAction, QShortcut)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QPen, QKeySequence
+from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen, QKeySequence,
+                         QPixmap)
 
 
 class NoScrollSlider(QSlider):
@@ -31,6 +32,20 @@ HISTORY_FILE = os.path.join(CONFIG_DIR, 'battery_history.csv')
 AUTOSTART_DIR = os.path.expanduser('~/.config/autostart')
 AUTOSTART_FILE = os.path.join(AUTOSTART_DIR, 'loq-control.desktop')
 SCRIPT_PATH = os.path.abspath(__file__)
+ICON_PATH = os.path.join(os.path.dirname(SCRIPT_PATH), 'loq.png')
+ICON_DIR = os.path.expanduser('~/.local/share/icons/hicolor')
+
+
+def _build_icon():
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        path = os.path.join(ICON_DIR, f'{size}x{size}', 'apps',
+                            'loq-control.png')
+        if os.path.isfile(path):
+            icon.addPixmap(QPixmap(path))
+    if icon.isNull():
+        icon = _build_icon()
+    return icon
 
 DEFAULT_CONFIG = {
     'theme': 'dark',
@@ -313,9 +328,14 @@ def fmt_rate(bps):
 def get_rapl_info():
     try:
         cur = int(read_sys(f'{RAPL}/constraint_0_power_limit_uw') or '0')
-        mx = int(read_sys(f'{RAPL}/constraint_0_max_power_uw') or '0')
-        if cur > 0 and mx > 0 and read_sys(f'{RAPL}/name') == 'package-0':
-            return cur // 1000000, mx // 1000000
+        tdp = int(read_sys(f'{RAPL}/constraint_0_max_power_uw') or '0')
+        if cur > 0 and tdp > 0 and read_sys(f'{RAPL}/name') == 'package-0':
+            cur_w = cur // 1000000
+            tdp_w = tdp // 1000000
+            # max_power_uw is TDP; actual limit can be higher (firmware)
+            slider_max = max(cur_w, tdp_w * 3, 100)
+            slider_max = min(slider_max, 200)
+            return min(cur_w, slider_max), slider_max
     except Exception:
         pass
     return None
@@ -451,6 +471,7 @@ class LOQControl(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('LOQ Control')
+        self.setWindowIcon(_build_icon())
         self.setFixedWidth(760)
         self.setMinimumHeight(640)
         self.setStyleSheet(f'background-color: {T["BG"]};')
@@ -461,6 +482,7 @@ class LOQControl(QWidget):
             glob.glob('/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq'))
         self.n_cores = len(self.cpu_freq_paths) or 1
         self.gpu_power_default = 45
+        self._pl_user_set = False
         self._prev_throttle = int(read_sys(
             '/sys/devices/system/cpu/cpu0/thermal_throttle/'
             'package_throttle_count') or '0')
@@ -475,8 +497,26 @@ class LOQControl(QWidget):
         self.initUI()
         self._setup_tray()
         self._setup_shortcuts()
-        if self.cfg.get('auto_apply_oc'):
-            self._auto_apply_oc()
+        self._auto_apply_oc()
+        # Restore slider positions from config
+        pl = self.cfg.get('oc_power_limit', 0)
+        gc = self.cfg.get('oc_gpu_clock', 0)
+        mc = self.cfg.get('oc_mem_clock_idx', 0)
+        if pl > 0:
+            self.pl_slider.blockSignals(True)
+            self.pl_slider.setValue(pl)
+            self.pl_slider.blockSignals(False)
+            self.pl_val.setText(f'{pl}W')
+        if gc >= 180:
+            self.gc_slider.blockSignals(True)
+            self.gc_slider.setValue(gc)
+            self.gc_slider.blockSignals(False)
+            self.gc_val.setText(f'{gc} MHz')
+        if mc > 0:
+            self.mc_slider.blockSignals(True)
+            self.mc_slider.setValue(mc)
+            self.mc_slider.blockSignals(False)
+            self.mc_val.setText(MEM_LABELS[mc])
 
     def initUI(self):
         outer = QVBoxLayout(self)
@@ -533,8 +573,18 @@ class LOQControl(QWidget):
         footer.setOpenExternalLinks(True)
         footer.setStyleSheet(
             f'color: {T["TEXT_MUTED"]}; background: transparent; '
-            f'padding: 12px 0 4px 0;')
+            f'padding: 12px 0 0 0;')
         root.addWidget(footer)
+        disclaimer = QLabel(
+            '\u201cLOQ\u201d and the LOQ logo are trademarks of Lenovo. '
+            'Not affiliated with or endorsed by Lenovo.')
+        disclaimer.setFont(QFont(FONT, 7))
+        disclaimer.setAlignment(Qt.AlignCenter)
+        disclaimer.setWordWrap(True)
+        disclaimer.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; background: transparent; '
+            f'padding: 0 20px 4px 20px;')
+        root.addWidget(disclaimer)
         scroll.setWidget(container)
         outer.addWidget(scroll)
 
@@ -692,25 +742,28 @@ class LOQControl(QWidget):
 
     def _slider_markers(self, markers, lw=150):
         row = QHBoxLayout()
-        row.setContentsMargins(lw + 10, 0, 90, 0)
+        row.setContentsMargins(lw + 18, 0, 98, 0)
         row.setSpacing(0)
         prev = 0
         for i, (frac, text) in enumerate(markers):
-            if i > 0:
-                row.addStretch(max(int((frac - prev) * 100), 1))
+            gap = frac - prev
+            if gap > 0:
+                row.addStretch(max(int(gap * 100), 1))
             lbl = QLabel(text)
             lbl.setFont(QFont(FONT, 7))
             lbl.setStyleSheet(
                 f'color: {T["TEXT_MUTED"]}; border: none; '
                 f'background: transparent;')
-            if i == 0:
+            if frac <= 0:
                 lbl.setAlignment(Qt.AlignLeft)
-            elif i == len(markers) - 1:
+            elif frac >= 1.0:
                 lbl.setAlignment(Qt.AlignRight)
             else:
                 lbl.setAlignment(Qt.AlignCenter)
             row.addWidget(lbl)
             prev = frac
+        if markers and markers[-1][0] < 1.0:
+            row.addStretch(max(int((1.0 - markers[-1][0]) * 100), 1))
         return row
 
     def _toggle_row(self, name):
@@ -885,9 +938,11 @@ class LOQControl(QWidget):
                 lambda v: self.tdp_val.setText(f'{v}W'))
             self.tdp_slider.sliderReleased.connect(self._apply_tdp)
             vbox.addLayout(r)
+            tdp_max = self.rapl[1]
             vbox.addLayout(self._slider_markers([
-                (0, '5W min'), (0.5, f'{self.rapl[1]//2}W'),
-                (1.0, f'{self.rapl[1]}W max')]))
+                (0, '5W min'), (55 / tdp_max, '55W TDP'),
+                (0.5, f'{tdp_max // 2}W'),
+                (1.0, f'{tdp_max}W max')]))
 
         vbox.addStretch()
         return card
@@ -1373,10 +1428,12 @@ class LOQControl(QWidget):
         self.gpu_power_default = int(info['default'])
         self.pl_slider.setRange(int(info['min']), int(info['max']))
         ci = int(cur)
-        self.pl_slider.blockSignals(True)
-        self.pl_slider.setValue(ci)
-        self.pl_slider.blockSignals(False)
-        self.pl_val.setText(f'{ci}W')
+        if not self._pl_user_set:
+            self.pl_slider.blockSignals(True)
+            self.pl_slider.setValue(ci)
+            self.pl_slider.blockSignals(False)
+            self.pl_val.setText(f'{ci}W')
+        self._pl_user_set = False
         self.oc_status.setText(
             f'Power {ci}W / {int(info["max"])}W max '
             f'(default {int(info["default"])}W)')
@@ -1501,6 +1558,7 @@ class LOQControl(QWidget):
     def _apply_power_limit(self):
         run_cmd(f'nvidia-smi -pl {self.pl_slider.value()}')
         self._save_oc_if_auto()
+        self._pl_user_set = True
         self.refresh_overclock()
 
     def _on_gc_change(self, v):
@@ -1533,8 +1591,6 @@ class LOQControl(QWidget):
         self.refresh_overclock()
 
     def _save_oc_if_auto(self):
-        if not self.cfg.get('auto_apply_oc'):
-            return
         self.cfg['oc_power_limit'] = self.pl_slider.value()
         self.cfg['oc_gpu_clock'] = self.gc_slider.value()
         self.cfg['oc_mem_clock_idx'] = self.mc_slider.value()
@@ -1615,7 +1671,7 @@ class LOQControl(QWidget):
                     f'[Desktop Entry]\n'
                     f'Name=LOQ Control Center\n'
                     f'Exec={SCRIPT_PATH} --minimized\n'
-                    f'Icon=preferences-system\n'
+                    f'Icon=loq-control\n'
                     f'Terminal=false\n'
                     f'Type=Application\n'
                     f'X-GNOME-Autostart-enabled=true\n')
@@ -1667,14 +1723,13 @@ class LOQControl(QWidget):
         self.tray = None
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
-        self.tray = QSystemTrayIcon(
-            QIcon.fromTheme('preferences-system'), self)
+        self.tray = QSystemTrayIcon(_build_icon(), self)
         menu = QMenu()
         show = menu.addAction('Show / Hide')
         show.triggered.connect(self._toggle_visibility)
         menu.addSeparator()
         for key, label in [('quiet', 'Quiet'), ('balanced', 'Balanced'),
-                           ('balanced-performance', 'Bal-Performance'),
+                           ('balanced-performance', 'Balanced-Performance'),
                            ('performance', 'Performance')]:
             a = menu.addAction(label)
             a.triggered.connect(lambda _, m=key: self.set_profile(m))
