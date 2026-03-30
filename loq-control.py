@@ -9,11 +9,14 @@ import subprocess
 import glob
 import threading
 import time
+import pwd
 from collections import deque
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFrame, QGridLayout, QSlider, QScrollArea, QMessageBox, QSizePolicy,
-    QProgressBar, QSystemTrayIcon, QMenu, QAction, QShortcut)
+    QProgressBar, QSystemTrayIcon, QMenu, QAction, QShortcut,
+    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
+    QAbstractItemView)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen, QKeySequence,
                          QPixmap)
@@ -235,16 +238,6 @@ def get_gpu_power():
     return info
 
 
-def get_gpu_processes():
-    output = run_output(['nvidia-smi'])
-    procs = []
-    for m in re.finditer(
-            r'\|\s+\d+\s+N/A\s+N/A\s+(\d+)\s+(\w+)\s+(.*?)\s+(\d+)MiB\s*\|',
-            output):
-        pid, ptype, name, mem = m.groups()
-        procs.append(dict(pid=pid, type=ptype,
-                          name=os.path.basename(name.strip()), mem=mem))
-    return procs
 
 
 def find_cpu_zone():
@@ -463,6 +456,343 @@ class CpuCoreGrid(QWidget):
         p.end()
 
 
+# ── Process Manager Window ────────────────────────────────────────────
+
+class ProcessManagerWindow(QWidget):
+    """Full system process manager with sortable table, search, and kill."""
+
+    _COLS = ['PID', 'Name', 'User', 'CPU %', 'MEM %', 'Memory', 'Status',
+             'Command']
+    _KEYS = ['pid', 'name', 'user', 'cpu_pct', 'mem_pct', 'mem_kb', 'state',
+             'cmdline']
+    _STATES = {'R': 'Running', 'S': 'Sleeping', 'D': 'Disk Wait',
+               'Z': 'Zombie', 'T': 'Stopped', 't': 'Tracing',
+               'X': 'Dead', 'I': 'Idle'}
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle('Process Manager \u2014 LOQ Control')
+        self.setWindowIcon(_build_icon())
+        self.setMinimumSize(960, 640)
+        self.setStyleSheet(f'background-color: {T["BG"]};')
+        self._clk_tck = os.sysconf('SC_CLK_TCK')
+        self._prev_times = {}
+        self._prev_ts = time.monotonic()
+        self._sort_col = 3
+        self._sort_order = Qt.DescendingOrder
+        self._uid_cache = {}
+        self._all_procs = []
+        self._build_ui()
+        self._refresh()
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(2000)
+
+    def _resolve_uid(self, uid):
+        if uid not in self._uid_cache:
+            try:
+                self._uid_cache[uid] = pwd.getpwuid(uid).pw_name
+            except KeyError:
+                self._uid_cache[uid] = str(uid)
+        return self._uid_cache[uid]
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+
+        title = QLabel('PROCESS MANAGER')
+        title.setFont(QFont(FONT, 16, QFont.Bold))
+        title.setStyleSheet(
+            f'color: {T["TEXT"]}; letter-spacing: 2px;')
+        lay.addWidget(title)
+
+        tb = QHBoxLayout()
+        tb.setSpacing(10)
+        self._search = QLineEdit()
+        self._search.setPlaceholderText('Search processes...')
+        self._search.setFont(QFont(FONT, 10))
+        self._search.setStyleSheet(f"""
+            QLineEdit {{
+                background: {T['CARD']}; color: {T['TEXT']};
+                border: 1px solid {T['BORDER']}; border-radius: 6px;
+                padding: 8px 12px;
+            }}
+            QLineEdit:focus {{ border-color: {T['TEXT_DIM']}; }}
+        """)
+        self._search.textChanged.connect(self._apply_filter)
+        tb.addWidget(self._search)
+
+        kill_btn = QPushButton('End Process')
+        kill_btn.setFont(QFont(FONT, 9, QFont.Bold))
+        kill_btn.setCursor(Qt.PointingHandCursor)
+        kill_btn.setMinimumHeight(36)
+        kill_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #cc3333; color: #ffffff;
+                border: none; border-radius: 6px; padding: 8px 16px;
+            }}
+            QPushButton:hover {{ background: #aa2222; }}
+        """)
+        kill_btn.clicked.connect(self._kill_selected)
+        tb.addWidget(kill_btn)
+
+        fkill_btn = QPushButton('Force Kill')
+        fkill_btn.setFont(QFont(FONT, 9, QFont.Bold))
+        fkill_btn.setCursor(Qt.PointingHandCursor)
+        fkill_btn.setMinimumHeight(36)
+        fkill_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #881111; color: #ffffff;
+                border: none; border-radius: 6px; padding: 8px 16px;
+            }}
+            QPushButton:hover {{ background: #660000; }}
+        """)
+        fkill_btn.clicked.connect(lambda: self._kill_selected(force=True))
+        tb.addWidget(fkill_btn)
+
+        lay.addLayout(tb)
+
+        self._count_lbl = QLabel('0 processes')
+        self._count_lbl.setFont(QFont(FONT, 9))
+        self._count_lbl.setStyleSheet(f'color: {T["TEXT_MUTED"]};')
+        lay.addWidget(self._count_lbl)
+
+        self._table = QTableWidget()
+        self._table.setColumnCount(len(self._COLS))
+        self._table.setHorizontalHeaderLabels(self._COLS)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setShowGrid(False)
+        self._table.setSortingEnabled(False)
+        self._table.setAlternatingRowColors(True)
+        self._table.horizontalHeader().sectionClicked.connect(
+            self._on_header_click)
+        self._table.setColumnWidth(0, 70)
+        self._table.setColumnWidth(1, 150)
+        self._table.setColumnWidth(2, 80)
+        self._table.setColumnWidth(3, 70)
+        self._table.setColumnWidth(4, 70)
+        self._table.setColumnWidth(5, 90)
+        self._table.setColumnWidth(6, 80)
+        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {T['CARD']};
+                alternate-background-color: {T['BG']};
+                border: 1px solid {T['BORDER']};
+                color: {T['TEXT']};
+                font-family: '{FONT}'; font-size: 9pt;
+            }}
+            QTableWidget::item {{ padding: 2px 8px; border: none; }}
+            QTableWidget::item:selected {{
+                background-color: {T['BTN_HOVER']}; color: {T['TEXT']};
+            }}
+            QHeaderView::section {{
+                background-color: {T['CARD']}; color: {T['TEXT_DIM']};
+                border: none; border-bottom: 2px solid {T['BORDER']};
+                padding: 6px 8px; font-family: '{FONT}';
+                font-size: 9pt; font-weight: bold;
+            }}
+            QHeaderView::section:hover {{ color: {T['TEXT']}; }}
+            QScrollBar:vertical {{
+                background: {T['CARD']}; width: 6px; border: none;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {T['BORDER']}; border-radius: 3px;
+                min-height: 30px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        """)
+        lay.addWidget(self._table)
+
+        QShortcut(QKeySequence('Ctrl+F'), self).activated.connect(
+            self._search.setFocus)
+        QShortcut(QKeySequence('Escape'), self).activated.connect(self.close)
+        QShortcut(QKeySequence('Delete'), self).activated.connect(
+            self._kill_selected)
+
+    def _get_processes(self):
+        total_mem = 1
+        try:
+            with open('/proc/meminfo') as f:
+                for line in f:
+                    if line.startswith('MemTotal:'):
+                        total_mem = int(line.split()[1]); break
+        except Exception:
+            pass
+
+        now = time.monotonic()
+        elapsed = max(now - self._prev_ts, 0.01)
+        self._prev_ts = now
+        new_times = {}
+        procs = []
+
+        for entry in os.listdir('/proc'):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            try:
+                with open(f'/proc/{pid}/stat') as f:
+                    stat = f.read()
+                name = stat[stat.index('(') + 1:stat.rindex(')')]
+                fields = stat[stat.rindex(')') + 2:].split()
+                cpu_time = int(fields[11]) + int(fields[12])
+                new_times[pid] = cpu_time
+                prev = self._prev_times.get(pid, cpu_time)
+                cpu_pct = max(0.0, (cpu_time - prev)
+                              / (elapsed * self._clk_tck) * 100)
+
+                rss_kb, uid = 0, 0
+                with open(f'/proc/{pid}/status') as f:
+                    for sline in f:
+                        if sline.startswith('VmRSS:'):
+                            rss_kb = int(sline.split()[1])
+                        elif sline.startswith('Uid:'):
+                            uid = int(sline.split()[1])
+
+                try:
+                    with open(f'/proc/{pid}/cmdline') as f:
+                        cmdline = f.read().replace('\0', ' ').strip()
+                except Exception:
+                    cmdline = ''
+
+                procs.append({
+                    'pid': pid, 'name': name,
+                    'user': self._resolve_uid(uid),
+                    'cpu_pct': round(cpu_pct, 1),
+                    'mem_pct': round(rss_kb / total_mem * 100, 1),
+                    'mem_kb': rss_kb,
+                    'state': self._STATES.get(fields[0], fields[0]),
+                    'cmdline': cmdline or name,
+                })
+            except (FileNotFoundError, ProcessLookupError,
+                    PermissionError, ValueError, IndexError):
+                continue
+
+        self._prev_times = new_times
+        return procs
+
+    def _refresh(self):
+        self._all_procs = self._get_processes()
+        self._update_table()
+
+    def _update_table(self):
+        procs = list(self._all_procs)
+        key = self._KEYS[self._sort_col]
+        rev = self._sort_order == Qt.DescendingOrder
+        procs.sort(key=lambda p: (p[key] if not isinstance(p[key], str)
+                                  else p[key].lower()), reverse=rev)
+
+        filt = self._search.text().lower()
+        if filt:
+            procs = [p for p in procs
+                     if filt in p['name'].lower()
+                     or filt in str(p['pid'])
+                     or filt in p['cmdline'].lower()
+                     or filt in p['user'].lower()]
+
+        sel_pid = None
+        row = self._table.currentRow()
+        if row >= 0:
+            item = self._table.item(row, 0)
+            if item:
+                sel_pid = item.data(Qt.UserRole)
+        vpos = self._table.verticalScrollBar().value()
+
+        self._table.setRowCount(len(procs))
+        new_row = -1
+        for i, p in enumerate(procs):
+            if p['pid'] == sel_pid:
+                new_row = i
+            mem_txt = (f'{p["mem_kb"] / 1048576:.1f} GB'
+                       if p['mem_kb'] >= 1048576
+                       else f'{p["mem_kb"] / 1024:.0f} MB'
+                       if p['mem_kb'] >= 1024
+                       else f'{p["mem_kb"]} KB')
+            vals = [str(p['pid']), p['name'], p['user'],
+                    f'{p["cpu_pct"]:.1f}', f'{p["mem_pct"]:.1f}',
+                    mem_txt, p['state'], p['cmdline']]
+            data = [p['pid'], None, None, p['cpu_pct'], p['mem_pct'],
+                    p['mem_kb'], None, None]
+            for c, (txt, d) in enumerate(zip(vals, data)):
+                it = QTableWidgetItem(txt)
+                if d is not None:
+                    it.setData(Qt.UserRole, d)
+                it.setForeground(QColor(T['TEXT']))
+                self._table.setItem(i, c, it)
+
+        if new_row >= 0:
+            self._table.selectRow(new_row)
+        self._table.verticalScrollBar().setValue(vpos)
+
+        arrows = {Qt.AscendingOrder: ' \u25b2', Qt.DescendingOrder: ' \u25bc'}
+        for c, col_name in enumerate(self._COLS):
+            lbl = col_name + (arrows[self._sort_order]
+                              if c == self._sort_col else '')
+            self._table.horizontalHeaderItem(c).setText(lbl)
+
+        total = len(self._prev_times)
+        shown = len(procs)
+        self._count_lbl.setText(
+            f'{shown} / {total} processes (filtered)' if filt
+            else f'{total} processes')
+
+    def _on_header_click(self, col):
+        if col == self._sort_col:
+            self._sort_order = (Qt.AscendingOrder
+                                if self._sort_order == Qt.DescendingOrder
+                                else Qt.DescendingOrder)
+        else:
+            self._sort_col = col
+            self._sort_order = (Qt.DescendingOrder if col in (0, 3, 4, 5)
+                                else Qt.AscendingOrder)
+        self._update_table()
+
+    def _apply_filter(self):
+        self._update_table()
+
+    def _kill_selected(self, force=False):
+        row = self._table.currentRow()
+        if row < 0:
+            return
+        pid_item = self._table.item(row, 0)
+        name_item = self._table.item(row, 1)
+        if not pid_item:
+            return
+        pid = pid_item.data(Qt.UserRole) or int(pid_item.text())
+        name = name_item.text() if name_item else str(pid)
+        verb = 'Force kill' if force else 'End'
+        msg = QMessageBox(self)
+        msg.setStyleSheet(MSG_STYLE)
+        msg.setWindowTitle(f'{verb} Process')
+        msg.setText(f'{verb} {name} (PID {pid})?')
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        if msg.exec_() != QMessageBox.Yes:
+            return
+        sig = 9 if force else 15
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            subprocess.run(['sudo', 'kill', f'-{sig}', str(pid)],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+        self._refresh()
+
+    def closeEvent(self, event):
+        self._timer.stop()
+        event.accept()
+
+
 # ── Main Window ───────────────────────────────────────────────────────
 
 class LOQControl(QWidget):
@@ -493,6 +823,7 @@ class LOQControl(QWidget):
         self._prev_time = time.monotonic()
         self.rapl = get_rapl_info()
         self._update_done.connect(self._on_update_done)
+        self._proc_manager = None
         log_battery_history(self.bat_path)
         self.initUI()
         self._setup_tray()
@@ -550,7 +881,7 @@ class LOQControl(QWidget):
         row = 0
         g.addWidget(self._build_sensors_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_activity_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_gpu_procs_card(), row, 0, 1, 2); row += 1
+        g.addWidget(self._build_proc_manager_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_temp_graph_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_battery_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_profile_card(), row, 0)
@@ -592,9 +923,6 @@ class LOQControl(QWidget):
         self.sensor_timer = QTimer()
         self.sensor_timer.timeout.connect(self.refresh_sensors)
         self.sensor_timer.start(3000)
-        self.proc_timer = QTimer()
-        self.proc_timer.timeout.connect(self.refresh_gpu_procs)
-        self.proc_timer.start(10000)
 
     # ── widget helpers ────────────────────────────────────────────────
 
@@ -1042,16 +1370,25 @@ class LOQControl(QWidget):
             'Saves current overclock and applies it when the app starts'))
         return card
 
-    def _build_gpu_procs_card(self):
+    def _build_proc_manager_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('GPU Processes'))
-        self.gpu_procs_lbl = QLabel('Loading...')
-        self.gpu_procs_lbl.setFont(QFont(FONT, 9))
-        self.gpu_procs_lbl.setStyleSheet(
-            f'color: {T["TEXT_DIM"]}; border: none; background: transparent;')
-        self.gpu_procs_lbl.setWordWrap(True)
-        vbox.addWidget(self.gpu_procs_lbl)
+        hdr = QHBoxLayout()
+        hdr.addWidget(self._header('Process Manager'))
+        hdr.addStretch()
+        btn = self._btn('Open', fs=9)
+        btn.setFixedSize(80, 30)
+        btn.clicked.connect(self._open_proc_manager)
+        hdr.addWidget(btn)
+        vbox.addLayout(hdr)
+        vbox.addWidget(self._info(
+            'System process manager with sorting, search, and process control'))
         return card
+
+    def _open_proc_manager(self):
+        if self._proc_manager is None or not self._proc_manager.isVisible():
+            self._proc_manager = ProcessManagerWindow(self)
+        self._proc_manager.show()
+        self._proc_manager.activateWindow()
 
     def _build_kbd_card(self):
         card, vbox = self._card()
@@ -1272,7 +1609,6 @@ class LOQControl(QWidget):
         self.refresh_sensors()
         self.refresh_battery()
         self.refresh_sysinfo()
-        self.refresh_gpu_procs()
 
     def refresh_sensors(self):
         cur = read_cpu_stat()
@@ -1520,18 +1856,6 @@ class LOQControl(QWidget):
         self.bios_ver.setText(
             read_sys('/sys/class/dmi/id/bios_version') or 'N/A')
 
-    def refresh_gpu_procs(self):
-        procs = get_gpu_processes()
-        if not procs:
-            self.gpu_procs_lbl.setText('No GPU processes')
-            return
-        lines = []
-        for p in procs[:8]:
-            lines.append(
-                f'{p["pid"]:>7}  {p["type"]:>1}  {p["mem"]:>5} MiB  '
-                f'{p["name"]}')
-        self.gpu_procs_lbl.setText('\n'.join(lines))
-
     # ── actions ───────────────────────────────────────────────────────
 
     def set_profile(self, mode):
@@ -1773,6 +2097,8 @@ class LOQControl(QWidget):
         QShortcut(QKeySequence('Ctrl+Q'), self).activated.connect(self._quit)
         QShortcut(QKeySequence('Ctrl+E'), self).activated.connect(
             self.export_specs)
+        QShortcut(QKeySequence('Ctrl+P'), self).activated.connect(
+            self._open_proc_manager)
 
 
 # ── Entry Point ───────────────────────────────────────────────────────
