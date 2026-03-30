@@ -475,9 +475,9 @@ class ProcessManagerWindow(QWidget):
         self.setWindowIcon(_build_icon())
         self.setMinimumSize(960, 640)
         self.setStyleSheet(f'background-color: {T["BG"]};')
-        self._clk_tck = os.sysconf('SC_CLK_TCK')
         self._prev_times = {}
-        self._prev_ts = time.monotonic()
+        self._n_cpus = os.cpu_count() or 1
+        self._prev_total = self._read_cpu_total()
         self._sort_col = 3
         self._sort_order = Qt.DescendingOrder
         self._uid_cache = {}
@@ -487,6 +487,15 @@ class ProcessManagerWindow(QWidget):
         self._timer = QTimer()
         self._timer.timeout.connect(self._refresh)
         self._timer.start(2000)
+
+    @staticmethod
+    def _read_cpu_total():
+        try:
+            with open('/proc/stat') as f:
+                parts = f.readline().split()
+            return sum(int(x) for x in parts[1:])
+        except Exception:
+            return 0
 
     def _resolve_uid(self, uid):
         if uid not in self._uid_cache:
@@ -629,9 +638,9 @@ class ProcessManagerWindow(QWidget):
         except Exception:
             pass
 
-        now = time.monotonic()
-        elapsed = max(now - self._prev_ts, 0.01)
-        self._prev_ts = now
+        total_cpu = self._read_cpu_total()
+        total_delta = max(total_cpu - self._prev_total, 1)
+        self._prev_total = total_cpu
         new_times = {}
         procs = []
 
@@ -648,7 +657,7 @@ class ProcessManagerWindow(QWidget):
                 new_times[pid] = cpu_time
                 prev = self._prev_times.get(pid, cpu_time)
                 cpu_pct = max(0.0, (cpu_time - prev)
-                              / (elapsed * self._clk_tck) * 100)
+                              / total_delta * 100)
 
                 rss_kb, uid = 0, 0
                 with open(f'/proc/{pid}/status') as f:
