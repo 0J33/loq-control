@@ -18,8 +18,8 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
     QAbstractItemView)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen, QKeySequence,
-                         QPixmap)
+from PyQt5.QtGui import (QFont, QFontMetrics, QIcon, QPainter, QColor, QPen,
+                         QKeySequence, QPixmap)
 
 
 class NoScrollSlider(QSlider):
@@ -471,7 +471,7 @@ class ProcessManagerWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent, Qt.Window)
-        self.setWindowTitle('Process Manager \u2014 LOQ Control')
+        self.setWindowTitle('Process Manager / LOQ Control')
         self.setWindowIcon(_build_icon())
         self.setMinimumSize(960, 640)
         self.setStyleSheet(f'background-color: {T["BG"]};')
@@ -793,6 +793,115 @@ class ProcessManagerWindow(QWidget):
         event.accept()
 
 
+# ── Fastfetch Window ──────────────────────────────────────────────────
+
+class TerminalGrid(QWidget):
+    """Paints characters on a fixed monospace grid, like a terminal."""
+
+    _ANSI = re.compile(r'\x1b\[([0-9;]*)([a-zA-Z])')
+
+    def __init__(self, font):
+        super().__init__()
+        self._font = font
+        fm = QFontMetrics(font)
+        self._cw = fm.horizontalAdvance('M')
+        self._ch = fm.height()
+        self._ascent = fm.ascent()
+        self._grid = []
+        self.setStyleSheet('background: transparent; border: none;')
+
+    def set_output(self, raw):
+        ansi = self._ANSI
+        grid = []
+        max_col = 0
+        for line in raw.split('\n'):
+            chars = []
+            col = 0
+            i = 0
+            while i < len(line):
+                if line[i] == '\x1b':
+                    m = ansi.match(line, i)
+                    if m:
+                        if m.group(2) == 'G':
+                            col = int(m.group(1) or '1') - 1
+                        i = m.end()
+                        continue
+                chars.append((col, line[i]))
+                col += 1
+                i += 1
+            grid.append(chars)
+            if col > max_col:
+                max_col = col
+        self._grid = grid
+        self.setFixedHeight(len(grid) * self._ch)
+        self.setMinimumWidth(round(max_col * self._cw))
+        self.update()
+
+    def paintEvent(self, event):
+        if not self._grid:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        p.setFont(self._font)
+        p.setPen(QColor(T['TEXT']))
+        cw, ch = self._cw, self._ch
+        asc = self._ascent
+        for row, chars in enumerate(self._grid):
+            y = row * ch + asc
+            for col, c in chars:
+                p.drawText(round(col * cw), y, c)
+        p.end()
+
+
+class FastfetchWindow(QWidget):
+    """Styled window displaying fastfetch output, auto-refreshing."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle('System Info / LOQ Control')
+        self.setWindowIcon(_build_icon())
+        self.setMinimumSize(640, 480)
+        self.setStyleSheet(f'background-color: {T["BG"]};')
+        self._build_ui()
+        self._refresh()
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(10000)
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+
+        title = QLabel('SYSTEM INFO')
+        title.setFont(QFont(FONT, 16, QFont.Bold))
+        title.setStyleSheet(
+            f'color: {T["TEXT"]}; letter-spacing: 2px;')
+        lay.addWidget(title)
+
+        frame = QFrame()
+        frame.setStyleSheet(
+            f'QFrame {{ background: {T["CARD"]};'
+            f' border: 1px solid {T["BORDER"]}; border-radius: 8px; }}')
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(16, 16, 16, 16)
+        self._display = TerminalGrid(QFont(FONT, 10))
+        fl.addWidget(self._display)
+        fl.addStretch()
+        lay.addWidget(frame, 1)
+
+        QShortcut(QKeySequence('Escape'), self).activated.connect(self.close)
+        QShortcut(QKeySequence('F5'), self).activated.connect(self._refresh)
+
+    def _refresh(self):
+        raw = run_output(['fastfetch', '-l', 'none', '--pipe'])
+        self._display.set_output(raw)
+
+    def closeEvent(self, event):
+        self._timer.stop()
+        event.accept()
+
+
 # ── Main Window ───────────────────────────────────────────────────────
 
 class LOQControl(QWidget):
@@ -824,6 +933,7 @@ class LOQControl(QWidget):
         self.rapl = get_rapl_info()
         self._update_done.connect(self._on_update_done)
         self._proc_manager = None
+        self._fastfetch_win = None
         log_battery_history(self.bat_path)
         self.initUI()
         self._setup_tray()
@@ -881,7 +991,8 @@ class LOQControl(QWidget):
         row = 0
         g.addWidget(self._build_sensors_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_activity_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_proc_manager_card(), row, 0, 1, 2); row += 1
+        g.addWidget(self._build_proc_manager_card(), row, 0)
+        g.addWidget(self._build_fastfetch_card(), row, 1); row += 1
         g.addWidget(self._build_temp_graph_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_battery_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_profile_card(), row, 0)
@@ -1389,6 +1500,26 @@ class LOQControl(QWidget):
             self._proc_manager = ProcessManagerWindow(self)
         self._proc_manager.show()
         self._proc_manager.activateWindow()
+
+    def _build_fastfetch_card(self):
+        card, vbox = self._card()
+        hdr = QHBoxLayout()
+        hdr.addWidget(self._header('System Info'))
+        hdr.addStretch()
+        btn = self._btn('Open', fs=9)
+        btn.setFixedSize(80, 30)
+        btn.clicked.connect(self._open_fastfetch)
+        hdr.addWidget(btn)
+        vbox.addLayout(hdr)
+        vbox.addWidget(self._info(
+            'Live fastfetch system overview'))
+        return card
+
+    def _open_fastfetch(self):
+        if self._fastfetch_win is None or not self._fastfetch_win.isVisible():
+            self._fastfetch_win = FastfetchWindow(self)
+        self._fastfetch_win.show()
+        self._fastfetch_win.activateWindow()
 
     def _build_kbd_card(self):
         card, vbox = self._card()
@@ -2099,6 +2230,8 @@ class LOQControl(QWidget):
             self.export_specs)
         QShortcut(QKeySequence('Ctrl+P'), self).activated.connect(
             self._open_proc_manager)
+        QShortcut(QKeySequence('Ctrl+I'), self).activated.connect(
+            self._open_fastfetch)
 
 
 # ── Entry Point ───────────────────────────────────────────────────────
