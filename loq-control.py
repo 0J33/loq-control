@@ -3,7 +3,6 @@
 
 import sys
 import os
-import re
 import json
 import subprocess
 import glob
@@ -18,13 +17,87 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
     QAbstractItemView)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import (QFont, QFontMetrics, QIcon, QPainter, QColor, QPen,
-                         QKeySequence, QPixmap)
+from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen,
+                         QKeySequence, QPixmap, QLinearGradient)
 
 
 class NoScrollSlider(QSlider):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._snap_step = 0
+        self._snap_fn = None
+        self._snapping = False
+
     def wheelEvent(self, event):
         event.ignore()
+
+    def mousePressEvent(self, event):
+        """Click-to-jump: a left click anywhere on the track sets the
+        slider's value to that position directly, instead of Qt's default
+        page-step nudge. This makes "click the '100' tick" actually go
+        to 100, which matches user expectation."""
+        if event.button() == Qt.LeftButton:
+            from PyQt5.QtWidgets import QStyleOptionSlider, QStyle
+            opt = QStyleOptionSlider()
+            self.initStyleOption(opt)
+            handle = self.style().subControlRect(
+                QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
+            if not handle.contains(event.pos()):
+                if self.orientation() == Qt.Horizontal:
+                    pos = event.pos().x() - handle.width() // 2
+                    span = self.width() - handle.width()
+                else:
+                    pos = event.pos().y() - handle.height() // 2
+                    span = self.height() - handle.height()
+                val = QStyle.sliderValueFromPosition(
+                    self.minimum(), self.maximum(),
+                    pos, span, opt.upsideDown)
+                self.setValue(val)
+                self.sliderReleased.emit()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def setSnap(self, step):
+        self._snap_step = step
+        self._snap_fn = None
+
+    def setSnapFn(self, fn):
+        self._snap_fn = fn
+        self._snap_step = 0
+
+    def _snap_value(self, v):
+        if self._snap_fn:
+            return self._snap_fn(v)
+        if self._snap_step > 1:
+            lo, hi = self.minimum(), self.maximum()
+            step = self._snap_step
+            # Magnetic endpoints: any value within one full step of
+            # either endpoint snaps to that endpoint. This makes the
+            # max/min reachable without pixel-precise dragging — values
+            # like 96-99 on a 5-100 slider all land on 100. Without
+            # this, standard "nearest grid" rounding gives 95 for v=97
+            # because 95 is closer (diff 2) than 100 (diff 3).
+            if v > hi - step:
+                return hi
+            if v < lo + step:
+                return lo
+            grid = round(v / step) * step
+            return max(lo, min(hi, grid))
+        return None
+
+    def sliderChange(self, change):
+        if change == QSlider.SliderValueChange and not self._snapping:
+            v = self.value()
+            snapped = self._snap_value(v)
+            if snapped is not None and snapped != v:
+                self._snapping = True
+                try:
+                    self.setValue(snapped)
+                finally:
+                    self._snapping = False
+                return
+        super().sliderChange(change)
 
 
 # ── Config ────────────────────────────────────────────────────────────
@@ -109,6 +182,25 @@ RAPL = '/sys/class/powercap/intel-rapl:0'
 MEM_LEVELS = [0, 9001, 11001, 12001]
 MEM_LABELS = ['Auto', '9 GHz', '11 GHz', '12 GHz']
 
+# GPU clock lock: 0 = Auto, otherwise snap to 5 MHz steps starting at 180.
+# Crossover point between Auto and locked is at 90 MHz on the slider.
+GPU_CLOCK_MIN = 180
+GPU_CLOCK_MAX = 3090
+GPU_CLOCK_STEP = 5
+
+
+def _gpu_clock_snap(v):
+    if v < GPU_CLOCK_MIN // 2:
+        return 0
+    if v < GPU_CLOCK_MIN:
+        return GPU_CLOCK_MIN
+    rem = (v - GPU_CLOCK_MIN) % GPU_CLOCK_STEP
+    if rem == 0:
+        return min(GPU_CLOCK_MAX, v)
+    up = GPU_CLOCK_STEP - rem
+    snapped = v - rem if rem <= up else v + up
+    return max(GPU_CLOCK_MIN, min(GPU_CLOCK_MAX, snapped))
+
 CARD_STYLE = f"""
     QFrame {{
         background-color: {T['CARD']};
@@ -127,6 +219,26 @@ SLIDER_STYLE = f"""
     }}
     QSlider::sub-page:horizontal {{
         background: {T['TEXT_DIM']}; border-radius: 3px;
+    }}
+"""
+# Slightly taller / accent variant used by overclock sliders so the ticks
+# Qt draws under TicksBelow have room and the track reads more clearly.
+OC_SLIDER_STYLE = f"""
+    QSlider {{ background: transparent; border: none; min-height: 38px;
+               padding: 0; }}
+    QSlider::groove:horizontal {{
+        background: {T['BORDER']}; height: 6px; border-radius: 3px;
+    }}
+    QSlider::handle:horizontal {{
+        background: {T['TEXT']}; width: 16px; height: 16px;
+        margin: -5px 0; border-radius: 8px;
+        border: 2px solid {T['BG']};
+    }}
+    QSlider::sub-page:horizontal {{
+        background: {T['TEXT_DIM']}; border-radius: 3px;
+    }}
+    QSlider::tick-mark:horizontal {{
+        background: {T['BORDER']};
     }}
 """
 BAR_STYLE = f"""
@@ -255,6 +367,158 @@ def find_battery():
     return None
 
 
+def cpu_model_short():
+    try:
+        with open('/proc/cpuinfo') as f:
+            for line in f:
+                if line.startswith('model name'):
+                    full = line.split(':', 1)[1].strip()
+                    s = (full.replace('(R)', '').replace('(TM)', '')
+                         .replace('Intel ', '').replace('  ', ' ').strip())
+                    return s
+    except Exception:
+        pass
+    return ''
+
+
+def gpu_model_short():
+    name = nvidia_query('name')[0] or ''
+    vram = nvidia_query('memory.total')[0] or ''
+    n = (name.replace('NVIDIA ', '').replace('GeForce ', '')
+         .replace(' GPU', '').replace(' Laptop', ' Laptop'))
+    if vram:
+        try:
+            gb = round(int(vram) / 1024)
+            return f'{n.strip()} · {gb} GB'
+        except ValueError:
+            pass
+    return n.strip()
+
+
+def fmt_bytes(n):
+    if n >= 1099511627776:
+        return f'{n / 1099511627776:.1f} TB'
+    if n >= 1073741824:
+        return f'{n / 1073741824:.1f} GB'
+    if n >= 1048576:
+        return f'{n / 1048576:.0f} MB'
+    if n >= 1024:
+        return f'{n / 1024:.0f} KB'
+    return f'{n} B'
+
+
+def list_drives():
+    """Whole-disk block devices we care about, with model and size."""
+    drives = []
+    try:
+        paths = (glob.glob('/sys/block/nvme*n*')
+                 + glob.glob('/sys/block/sd*')
+                 + glob.glob('/sys/block/mmcblk*'))
+        for path in sorted(paths):
+            dev = os.path.basename(path)
+            if dev.startswith('nvme') and 'p' in dev.split('n', 1)[-1]:
+                continue
+            size_sec = int(read_sys(f'{path}/size') or '0')
+            size = size_sec * 512
+            if size <= 0:
+                continue
+            model = (read_sys(f'{path}/device/model')
+                     or read_sys(f'{path}/device/name') or '').strip()
+            drives.append({'dev': dev, 'model': model, 'size': size})
+    except Exception:
+        pass
+    return drives
+
+
+def drive_temp(dev):
+    """NVMe / SATA drive temperature in °C, or None if unavailable."""
+    try:
+        for hwmon in glob.glob(f'/sys/block/{dev}/device/hwmon/hwmon*'):
+            for tf in sorted(glob.glob(f'{hwmon}/temp*_input')):
+                raw = read_sys(tf)
+                if raw:
+                    return int(raw) // 1000
+        for hwmon in glob.glob('/sys/class/nvme/*/hwmon*'):
+            ctrl = os.path.basename(os.path.dirname(hwmon))
+            if dev.startswith(ctrl):
+                raw = read_sys(f'{hwmon}/temp1_input')
+                if raw:
+                    return int(raw) // 1000
+    except Exception:
+        pass
+    return None
+
+
+def drive_usage(dev):
+    """Best-effort (used, total) bytes for the largest partition on this drive."""
+    try:
+        with open('/proc/mounts') as f:
+            mounts = []
+            for line in f:
+                p = line.split()
+                if len(p) >= 2 and p[0].startswith(f'/dev/{dev}'):
+                    mounts.append(p[1])
+        best_total = 0; best_used = 0
+        for mp in mounts:
+            try:
+                s = os.statvfs(mp)
+                total = s.f_blocks * s.f_frsize
+                used = (s.f_blocks - s.f_bavail) * s.f_frsize
+                if total > best_total:
+                    best_total = total; best_used = used
+            except OSError:
+                pass
+        return best_used, best_total
+    except Exception:
+        return 0, 0
+
+
+def list_active_nics():
+    """Active non-loopback interfaces with type, SSID/IP info."""
+    nics = []
+    try:
+        for path in sorted(glob.glob('/sys/class/net/*')):
+            iface = os.path.basename(path)
+            if iface == 'lo':
+                continue
+            operstate = (read_sys(f'{path}/operstate') or 'unknown').strip()
+            carrier = (read_sys(f'{path}/carrier') or '0').strip()
+            if operstate != 'up' and carrier != '1':
+                continue
+            if os.path.isdir(f'{path}/wireless'):
+                kind = 'wifi'
+            elif iface.startswith(('en', 'eth')):
+                kind = 'eth'
+            elif iface.startswith(('tailscale', 'wg', 'tun', 'tap')):
+                kind = 'vpn'
+            else:
+                kind = 'other'
+            ssid = None
+            if kind == 'wifi':
+                try:
+                    r = subprocess.run(['iwgetid', '-r', iface],
+                                       capture_output=True, text=True,
+                                       timeout=2)
+                    ssid = r.stdout.strip() or None
+                except Exception:
+                    pass
+            ip = None
+            try:
+                r = subprocess.run(
+                    ['ip', '-4', '-br', 'addr', 'show', iface],
+                    capture_output=True, text=True, timeout=2)
+                parts = r.stdout.strip().split()
+                if len(parts) >= 3 and '/' in parts[2]:
+                    ip = parts[2].split('/')[0]
+            except Exception:
+                pass
+            nics.append({'iface': iface, 'kind': kind,
+                         'ssid': ssid, 'ip': ip})
+    except Exception:
+        pass
+    return nics
+
+
 def read_cpu_stat():
     try:
         with open('/proc/stat') as f:
@@ -302,9 +566,23 @@ def read_disk_stats():
         with open('/proc/diskstats') as f:
             for line in f:
                 p = line.split()
+                if len(p) < 14:
+                    continue
                 name = p[2]
-                if name.startswith('nvme') and 'p' not in name:
-                    stats[name] = (int(p[5]), int(p[9]))
+                # whole-disk devices only, no partitions
+                if name.startswith('nvme'):
+                    tail = name.split('n', 1)[-1]
+                    if 'p' in tail:
+                        continue
+                elif name.startswith('sd'):
+                    if any(c.isdigit() for c in name[2:]):
+                        continue
+                elif name.startswith('mmcblk'):
+                    if 'p' in name:
+                        continue
+                else:
+                    continue
+                stats[name] = (int(p[5]), int(p[9]))
     except Exception:
         pass
     return stats
@@ -382,7 +660,9 @@ class TempGraph(QWidget):
         self.max_pts = max_pts
         self.cpu = deque(maxlen=max_pts)
         self.gpu = deque(maxlen=max_pts)
-        self.setFixedHeight(120)
+        self.setFixedHeight(140)
+        self.setMouseTracking(True)
+        self._hover_x = None
         self.setStyleSheet('background: transparent; border: none;')
 
     def add(self, ct, gt):
@@ -390,70 +670,446 @@ class TempGraph(QWidget):
         self.gpu.append(gt)
         self.update()
 
-    def paintEvent(self, event):
-        if len(self.cpu) < 2:
-            return
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-        ml, mb = 35, 18
-        gw, gh = w - ml - 5, h - mb - 5
-        mx = 105
-        p.setPen(QPen(QColor(T['GR_GRID']), 1))
-        for t in (25, 50, 75, 100):
-            y = int(5 + gh * (1 - t / mx))
-            p.drawLine(ml, y, w - 5, y)
-            p.setPen(QPen(QColor(T['GR_TEXT']), 1))
-            p.setFont(QFont(FONT, 7))
-            p.drawText(0, y + 4, f'{t}\u00b0')
-            p.setPen(QPen(QColor(T['GR_GRID']), 1))
+    def mouseMoveEvent(self, ev):
+        self._hover_x = ev.pos().x()
+        self.update()
 
-        def draw(data, color):
-            if len(data) < 2:
-                return
-            p.setPen(QPen(QColor(color), 2))
-            pts = [(ml + int(i * gw / (self.max_pts - 1)),
-                    int(5 + gh * (1 - min(v, mx) / mx)))
-                   for i, v in enumerate(data)]
-            for i in range(len(pts) - 1):
-                p.drawLine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
-
-        draw(self.cpu, '#4488ff')
-        draw(self.gpu, '#ff4444')
-        p.setFont(QFont(FONT, 7, QFont.Bold))
-        p.setPen(QPen(QColor('#4488ff'), 1))
-        p.drawText(ml + 5, h - 3, 'CPU')
-        p.setPen(QPen(QColor('#ff4444'), 1))
-        p.drawText(ml + 40, h - 3, 'GPU')
-        p.end()
-
-
-class CpuCoreGrid(QWidget):
-    def __init__(self, count):
-        super().__init__()
-        self.count = count
-        self.values = [0] * count
-        self.cols = min(count, 14)
-        rows = (count + self.cols - 1) // self.cols
-        self.setFixedHeight(rows * 12 + (rows - 1) * 2)
-        self.setStyleSheet('background: transparent; border: none;')
-
-    def set_values(self, vals):
-        self.values = vals[:self.count]
+    def leaveEvent(self, ev):
+        self._hover_x = None
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        ml, mb = 35, 20
+        gw, gh = w - ml - 8, h - mb - 6
+        mx = 105
+        # horizontal grid + Y labels
+        for t in (25, 50, 75, 100):
+            y = int(6 + gh * (1 - t / mx))
+            grid = QColor(T['GR_GRID']); grid.setAlpha(110)
+            p.setPen(QPen(grid, 1, Qt.DotLine))
+            p.drawLine(ml, y, w - 5, y)
+            p.setPen(QPen(QColor(T['GR_TEXT']), 1))
+            p.setFont(QFont(FONT, 7))
+            p.drawText(0, y + 4, f'{t}\u00b0')
+        # vertical time gridlines
+        grid = QColor(T['GR_GRID']); grid.setAlpha(60)
+        p.setPen(QPen(grid, 1, Qt.DotLine))
+        for f in (0.25, 0.5, 0.75):
+            x = int(ml + gw * f)
+            p.drawLine(x, 6, x, 6 + gh)
+
+        def points(data):
+            return [(ml + int(i * gw / (self.max_pts - 1)),
+                     int(6 + gh * (1 - min(v, mx) / mx)))
+                    for i, v in enumerate(data)]
+
+        cpu_pts = points(self.cpu) if len(self.cpu) >= 2 else []
+        gpu_pts = points(self.gpu) if len(self.gpu) >= 2 else []
+
+        def draw(pts, color):
+            if not pts:
+                return
+            p.setPen(QPen(QColor(color), 2))
+            for i in range(len(pts) - 1):
+                p.drawLine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
+
+        draw(cpu_pts, '#4488ff')
+        draw(gpu_pts, '#ff4444')
+        p.setFont(QFont(FONT, 7, QFont.Bold))
+        p.setPen(QPen(QColor('#4488ff'), 1))
+        p.drawText(ml + 5, h - 4, 'CPU')
+        p.setPen(QPen(QColor('#ff4444'), 1))
+        p.drawText(ml + 40, h - 4, 'GPU')
+
+        # hover crosshair
+        if self._hover_x is None or self._hover_x < ml or self._hover_x > ml + gw:
+            return
+        if not cpu_pts and not gpu_pts:
+            return
+        # pick best index from whichever line has data
+        ref = cpu_pts or gpu_pts
+        best_i, best_dx = 0, abs(ref[0][0] - self._hover_x)
+        for i, (px, _) in enumerate(ref):
+            dx = abs(px - self._hover_x)
+            if dx < best_dx:
+                best_i, best_dx = i, dx
+        hx = ref[best_i][0]
+        cross = QColor(T['TEXT']); cross.setAlpha(120)
+        p.setPen(QPen(cross, 1))
+        p.drawLine(hx, 6, hx, 6 + gh)
+        # dots + tooltip text
+        cv = self.cpu[best_i] if best_i < len(self.cpu) else None
+        gv = self.gpu[best_i] if best_i < len(self.gpu) else None
+        if cv is not None and cpu_pts:
+            p.setBrush(QColor('#4488ff')); p.setPen(QPen(QColor(T['BG']), 1.2))
+            cy = cpu_pts[best_i][1]
+            p.drawEllipse(hx - 3, cy - 3, 6, 6)
+        if gv is not None and gpu_pts:
+            p.setBrush(QColor('#ff4444')); p.setPen(QPen(QColor(T['BG']), 1.2))
+            gy = gpu_pts[best_i][1]
+            p.drawEllipse(hx - 3, gy - 3, 6, 6)
+        parts = []
+        if cv is not None: parts.append(f'CPU {int(cv)}\u00b0')
+        if gv is not None: parts.append(f'GPU {int(gv)}\u00b0')
+        if not parts:
+            return
+        text = '  '.join(parts)
+        p.setFont(QFont(FONT, 8, QFont.Bold))
+        fm = p.fontMetrics()
+        tw = fm.horizontalAdvance(text) + 10
+        th = fm.height() + 4
+        lx = hx + 8
+        if lx + tw > w - 4: lx = hx - tw - 8
+        ly = 6
+        bg = QColor(T['CARD']); bg.setAlpha(235)
+        p.setPen(QPen(QColor(T['BORDER']), 1)); p.setBrush(bg)
+        p.drawRoundedRect(lx, ly, tw, th, 3, 3)
+        p.setPen(QPen(QColor(T['TEXT'])))
+        p.drawText(lx + 5, ly + fm.ascent() + 2, text)
+
+
+class SliderTicks(QWidget):
+    """Tick marks + labels aligned with a QSlider's actual track geometry.
+
+    Sits in the layout directly below a slider. Uses
+    QStyle.subControlRect(SC_SliderHandle / SC_SliderGroove) to find the
+    handle's left/right travel limits, so labels land exactly under the
+    handle when the slider is at that value.
+    """
+
+    def __init__(self, slider, ticks):
+        super().__init__()
+        self.slider = slider
+        self.ticks = ticks  # list of (value, label)
+        self.setFixedHeight(22)
+        # Match the slider's expanding horizontal policy so this widget
+        # has the same width as the slider above it — otherwise the tick
+        # positions (computed from the slider's geometry) won't match
+        # this widget's geometry and clicks resolve to the wrong value.
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet('background: transparent; border: none;')
+
+    def mousePressEvent(self, event):
+        """Click a tick to snap the slider exactly to that tick's value."""
+        if event.button() != Qt.LeftButton or not self.ticks:
+            return super().mousePressEvent(event)
+        x_min, x_max = self._track_extents()
+        lo, hi = self.slider.minimum(), self.slider.maximum()
+        rng = hi - lo if hi > lo else 1
+        click_x = event.pos().x()
+        best_v, best_dx = self.ticks[0][0], 10**9
+        for v, _ in self.ticks:
+            vv = max(lo, min(hi, v))
+            frac = (vv - lo) / rng
+            tx = x_min + int(frac * (x_max - x_min))
+            dx = abs(tx - click_x)
+            if dx < best_dx:
+                best_v, best_dx = vv, dx
+        # Only treat as a tick-click if the click was reasonably close
+        # to one of the labels (don't hijack random clicks).
+        if best_dx <= 24:
+            self.slider.setValue(best_v)
+            self.slider.sliderReleased.emit()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def _track_extents(self):
+        """Return (x_at_min, x_at_max) in this widget's coordinates."""
+        from PyQt5.QtWidgets import QStyleOptionSlider, QStyle
+        opt = QStyleOptionSlider()
+        self.slider.initStyleOption(opt)
+        style = self.slider.style()
+        # Range where the handle's center can sit:
+        # slider.minimum() corresponds to handle centered at left end of
+        # available track, slider.maximum() at right end.
+        handle = style.subControlRect(
+            QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self.slider)
+        groove = style.subControlRect(
+            QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self.slider)
+        hw = handle.width()
+        avail = max(1, groove.width() - hw)
+        # the slider's x within its own widget; assume our widget has the
+        # same width and starts at x=0 too (true inside a QVBoxLayout)
+        x_min = groove.x() + hw // 2
+        x_max = x_min + avail
+        return x_min, x_max
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
         w = self.width()
-        cw = max(4, (w - (self.cols - 1) * 2) // self.cols)
+        if w < 4 or not self.ticks:
+            return
+        x_min, x_max = self._track_extents()
+        lo, hi = self.slider.minimum(), self.slider.maximum()
+        rng = hi - lo if hi > lo else 1
+        p.setFont(QFont(FONT, 7))
+        fm = p.fontMetrics()
+        for value, label in self.ticks:
+            v = max(lo, min(hi, value))
+            frac = (v - lo) / rng
+            x = x_min + int(frac * (x_max - x_min))
+            # tick line
+            tick = QColor(T['GR_TEXT']); tick.setAlpha(180)
+            p.setPen(QPen(tick, 1))
+            p.drawLine(x, 0, x, 4)
+            # label centered on tick
+            p.setPen(QPen(QColor(T['TEXT_MUTED'])))
+            tw = fm.horizontalAdvance(label)
+            lx = max(0, min(w - tw, x - tw // 2))
+            p.drawText(lx, fm.ascent() + 6, label)
+
+
+class Sparkline(QWidget):
+    """Compact line graph for a single metric. Auto-scales to data peak.
+
+    Features:
+      - Horizontal grid lines (25/50/75% of fixed_max, or quartiles otherwise)
+      - Faint vertical time gridlines
+      - Hover crosshair + value tooltip when mouse is over the graph
+    """
+
+    def __init__(self, max_pts=60, color='#4cc4ff', height=46,
+                 fixed_max=None, fmt=None):
+        super().__init__()
+        self.max_pts = max_pts
+        self.color = color
+        self.fixed_max = fixed_max
+        # fmt(v) -> str. Defaults to integer percent-like formatting.
+        self.fmt = fmt or (lambda v: f'{v:.1f}' if v < 10 else f'{int(v)}')
+        self.data = deque(maxlen=max_pts)
+        self._hover_x = None
+        self.setFixedHeight(height)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMouseTracking(True)
+        self.setStyleSheet('background: transparent; border: none;')
+
+    def add(self, v):
+        self.data.append(max(0.0, float(v)))
+        self.update()
+
+    def reset(self):
+        self.data.clear()
+        self.update()
+
+    def mouseMoveEvent(self, ev):
+        self._hover_x = ev.pos().x()
+        self.update()
+
+    def leaveEvent(self, ev):
+        self._hover_x = None
+        self.update()
+
+    def paintEvent(self, event):
+        from PyQt5.QtGui import QPainterPath
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        if w <= 4 or h <= 4:
+            return
+        # ── grid lines ───────────────────────────────────────────────
+        grid = QColor(T['GR_GRID']); grid.setAlpha(90)
+        p.setPen(QPen(grid, 1, Qt.DotLine))
+        for frac in (0.25, 0.5, 0.75):
+            y = int((h - 2) * frac) + 1
+            p.drawLine(0, y, w, y)
+        for frac in (0.25, 0.5, 0.75):
+            x = int((w - 1) * frac)
+            p.drawLine(x, 0, x, h)
+        # solid baseline
+        p.setPen(QPen(QColor(T['GR_GRID']), 1))
+        p.drawLine(0, h - 1, w, h - 1)
+
+        n = len(self.data)
+        if n < 2:
+            return
+        mx = self.fixed_max if self.fixed_max else max(max(self.data), 1.0)
+        if mx <= 0:
+            mx = 1.0
+        col = QColor(self.color)
+        pts = []
+        for i, v in enumerate(self.data):
+            x = int(i * (w - 1) / (self.max_pts - 1))
+            y = int((h - 2) * (1 - min(v, mx) / mx)) + 1
+            pts.append((x, y))
+        # fill under the line
+        fill = QColor(self.color); fill.setAlpha(60)
+        end = QColor(self.color);  end.setAlpha(0)
+        grad = QLinearGradient(0, 0, 0, h)
+        grad.setColorAt(0.0, fill)
+        grad.setColorAt(1.0, end)
+        path = QPainterPath()
+        path.moveTo(pts[0][0], h)
+        for x, y in pts:
+            path.lineTo(x, y)
+        path.lineTo(pts[-1][0], h)
+        path.closeSubpath()
+        p.fillPath(path, grad)
+        # line
+        p.setPen(QPen(col, 1.6))
+        for i in range(len(pts) - 1):
+            p.drawLine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
+
+        # ── hover crosshair + value ─────────────────────────────────
+        if self._hover_x is None or not (0 <= self._hover_x < w):
+            return
+        # Map x → nearest data index based on actual drawn x positions
+        hx = self._hover_x
+        # search nearest index by x distance
+        best_i, best_dx = 0, abs(pts[0][0] - hx)
+        for i, (px, _) in enumerate(pts):
+            dx = abs(px - hx)
+            if dx < best_dx:
+                best_i, best_dx = i, dx
+        hx, hy = pts[best_i]
+        # crosshair
+        cross = QColor(T['TEXT']); cross.setAlpha(120)
+        p.setPen(QPen(cross, 1))
+        p.drawLine(hx, 0, hx, h)
+        # dot
+        p.setBrush(col)
+        p.setPen(QPen(QColor(T['BG']), 1.2))
+        p.drawEllipse(hx - 3, hy - 3, 6, 6)
+        # value label
+        text = self.fmt(self.data[best_i])
+        p.setFont(QFont(FONT, 8, QFont.Bold))
+        fm = p.fontMetrics()
+        tw = fm.horizontalAdvance(text) + 8
+        th = fm.height() + 2
+        lx = hx + 6
+        if lx + tw > w:
+            lx = hx - tw - 6
+        ly = max(0, hy - th - 2)
+        bg = QColor(T['CARD']); bg.setAlpha(230)
+        p.setPen(QPen(QColor(T['BORDER']), 1))
+        p.setBrush(bg)
+        p.drawRoundedRect(lx, ly, tw, th, 3, 3)
+        p.setPen(QPen(QColor(T['TEXT'])))
+        p.drawText(lx + 4, ly + fm.ascent() + 1, text)
+
+
+class CpuCoreGrid(QWidget):
+    """Per-core utilization as animated vertical bars (EQ-style) with hover.
+
+    Each core renders as a vertical column with:
+      - faint full-height background rail
+      - filled bar from the baseline to current %
+      - core index label below the bar
+      - color graded by load (low/med/high/max)
+    Hover any column to see "Core N: xx%".
+    """
+
+    def __init__(self, count):
+        super().__init__()
+        self.count = count
+        self.values = [0] * count
+        self.setFixedHeight(96)
+        self.setMouseTracking(True)
+        self._hover_i = None
+        self.setStyleSheet('background: transparent; border: none;')
+
+    def set_values(self, vals):
+        self.values = vals[:self.count] + [0] * (self.count - len(vals))
+        self.update()
+
+    def _layout(self):
+        w = self.width(); h = self.height()
+        bar_h = h - 16  # leave room for label below
+        # tight gap, fixed-width-feel bars
+        n = max(1, self.count)
+        gap = 3
+        cw = max(3, int((w - gap * (n - 1)) / n))
+        # recompute gap to evenly fill width
+        used = cw * n + gap * (n - 1)
+        slack = max(0, w - used)
+        return cw, gap, slack, bar_h
+
+    def _index_at_x(self, x):
+        cw, gap, slack, _ = self._layout()
+        # distribute slack as a left offset so bars look centred
+        off = slack // 2
+        if x < off:
+            return None
+        rel = x - off
+        step = cw + gap
+        i = rel // step if step else 0
+        if i < 0 or i >= self.count:
+            return None
+        # ensure click is inside a bar, not in the gap
+        if rel - i * step > cw:
+            return None
+        return int(i)
+
+    def mouseMoveEvent(self, ev):
+        self._hover_i = self._index_at_x(ev.pos().x())
+        self.update()
+
+    def leaveEvent(self, ev):
+        self._hover_i = None
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        cw, gap, slack, bar_h = self._layout()
+        off = slack // 2
+        base_y = bar_h
+        # baseline
+        p.setPen(QPen(QColor(T['GR_GRID']), 1))
+        p.drawLine(0, base_y + 1, w, base_y + 1)
+        # bars
         for i, v in enumerate(self.values):
-            r, c = i // self.cols, i % self.cols
-            x, y = c * (cw + 2), r * 14
             v = max(0, min(100, v))
-            color = (T['CORE_LO'] if v < 30 else T['CORE_MED'] if v < 60
-                     else T['CORE_HI'] if v < 85 else T['CORE_MAX'])
-            p.fillRect(x, y, cw, 10, QColor(color))
-        p.end()
+            x = off + i * (cw + gap)
+            # background rail
+            rail = QColor(T['BORDER']); rail.setAlpha(120)
+            p.fillRect(x, 0, cw, bar_h, rail)
+            # bar fill height
+            bh = int(bar_h * v / 100)
+            if bh > 0:
+                color = (T['CORE_LO'] if v < 30 else T['CORE_MED'] if v < 60
+                         else T['CORE_HI'] if v < 85 else T['CORE_MAX'])
+                p.fillRect(x, base_y - bh, cw, bh, QColor(color))
+        # core index labels (every 2 cores if cramped, else every 1)
+        p.setFont(QFont(FONT, 6))
+        p.setPen(QPen(QColor(T['GR_TEXT'])))
+        step = 1 if cw >= 14 else 2 if cw >= 8 else 4
+        for i in range(0, self.count, step):
+            x = off + i * (cw + gap)
+            fm = p.fontMetrics()
+            text = str(i)
+            tw = fm.horizontalAdvance(text)
+            p.drawText(x + (cw - tw) // 2, h - 3, text)
+        # hover tooltip
+        if self._hover_i is None or self._hover_i >= len(self.values):
+            return
+        i = self._hover_i
+        x = off + i * (cw + gap)
+        # highlight bar
+        hi = QColor(T['TEXT']); hi.setAlpha(70)
+        p.setPen(QPen(hi, 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(x - 1, 0, cw + 1, bar_h)
+        # label
+        text = f'Core {i} · {self.values[i]}%'
+        p.setFont(QFont(FONT, 8, QFont.Bold))
+        fm = p.fontMetrics()
+        tw = fm.horizontalAdvance(text) + 10
+        th = fm.height() + 4
+        lx = x + cw + 6
+        if lx + tw > w: lx = x - tw - 6
+        ly = max(0, base_y - bar_h)
+        bg = QColor(T['CARD']); bg.setAlpha(235)
+        p.setPen(QPen(QColor(T['BORDER']), 1)); p.setBrush(bg)
+        p.drawRoundedRect(lx, ly, tw, th, 3, 3)
+        p.setPen(QPen(QColor(T['TEXT'])))
+        p.drawText(lx + 5, ly + fm.ascent() + 2, text)
 
 
 # ── Process Manager Window ────────────────────────────────────────────
@@ -802,115 +1458,6 @@ class ProcessManagerWindow(QWidget):
         event.accept()
 
 
-# ── Fastfetch Window ──────────────────────────────────────────────────
-
-class TerminalGrid(QWidget):
-    """Paints characters on a fixed monospace grid, like a terminal."""
-
-    _ANSI = re.compile(r'\x1b\[([0-9;]*)([a-zA-Z])')
-
-    def __init__(self, font):
-        super().__init__()
-        self._font = font
-        fm = QFontMetrics(font)
-        self._cw = fm.horizontalAdvance('M')
-        self._ch = fm.height()
-        self._ascent = fm.ascent()
-        self._grid = []
-        self.setStyleSheet('background: transparent; border: none;')
-
-    def set_output(self, raw):
-        ansi = self._ANSI
-        grid = []
-        max_col = 0
-        for line in raw.split('\n'):
-            chars = []
-            col = 0
-            i = 0
-            while i < len(line):
-                if line[i] == '\x1b':
-                    m = ansi.match(line, i)
-                    if m:
-                        if m.group(2) == 'G':
-                            col = int(m.group(1) or '1') - 1
-                        i = m.end()
-                        continue
-                chars.append((col, line[i]))
-                col += 1
-                i += 1
-            grid.append(chars)
-            if col > max_col:
-                max_col = col
-        self._grid = grid
-        self.setFixedHeight(len(grid) * self._ch)
-        self.setMinimumWidth(round(max_col * self._cw))
-        self.update()
-
-    def paintEvent(self, event):
-        if not self._grid:
-            return
-        p = QPainter(self)
-        p.setRenderHint(QPainter.TextAntialiasing)
-        p.setFont(self._font)
-        p.setPen(QColor(T['TEXT']))
-        cw, ch = self._cw, self._ch
-        asc = self._ascent
-        for row, chars in enumerate(self._grid):
-            y = row * ch + asc
-            for col, c in chars:
-                p.drawText(round(col * cw), y, c)
-        p.end()
-
-
-class FastfetchWindow(QWidget):
-    """Styled window displaying fastfetch output, auto-refreshing."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent, Qt.Window)
-        self.setWindowTitle('System Info / LOQ Control')
-        self.setWindowIcon(_build_icon())
-        self.setMinimumSize(640, 480)
-        self.setStyleSheet(f'background-color: {T["BG"]};')
-        self._build_ui()
-        self._refresh()
-        self._timer = QTimer()
-        self._timer.timeout.connect(self._refresh)
-        self._timer.start(10000)
-
-    def _build_ui(self):
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(12)
-
-        title = QLabel('SYSTEM INFO')
-        title.setFont(QFont(FONT, 16, QFont.Bold))
-        title.setStyleSheet(
-            f'color: {T["TEXT"]}; letter-spacing: 2px;')
-        lay.addWidget(title)
-
-        frame = QFrame()
-        frame.setStyleSheet(
-            f'QFrame {{ background: {T["CARD"]};'
-            f' border: 1px solid {T["BORDER"]}; border-radius: 8px; }}')
-        fl = QVBoxLayout(frame)
-        fl.setContentsMargins(16, 16, 16, 16)
-        self._display = TerminalGrid(QFont(FONT, 10))
-        fl.addWidget(self._display)
-        fl.addStretch()
-        lay.addWidget(frame, 1)
-
-        QShortcut(QKeySequence('Escape'), self).activated.connect(self.close)
-        QShortcut(QKeySequence('F5'), self).activated.connect(self._refresh)
-
-    def _refresh(self):
-        raw = run_output(['fastfetch', '-l', 'none', '--pipe'])
-        self._display.set_output(raw)
-
-    def closeEvent(self, event):
-        self._timer.stop()
-        event.accept()
-
-
 # ── Main Window ───────────────────────────────────────────────────────
 
 class LOQControl(QWidget):
@@ -920,8 +1467,8 @@ class LOQControl(QWidget):
         super().__init__()
         self.setWindowTitle('LOQ Control')
         self.setWindowIcon(_build_icon())
-        self.setFixedWidth(760)
-        self.setMinimumHeight(640)
+        self.setMinimumSize(820, 640)
+        self.resize(1100, 880)
         self.setStyleSheet(f'background-color: {T["BG"]};')
         self.cfg = load_config()
         self.cpu_zone = find_cpu_zone()
@@ -942,7 +1489,6 @@ class LOQControl(QWidget):
         self.rapl = get_rapl_info()
         self._update_done.connect(self._on_update_done)
         self._proc_manager = None
-        self._fastfetch_win = None
         log_battery_history(self.bat_path)
         self.initUI()
         self._setup_tray()
@@ -956,8 +1502,8 @@ class LOQControl(QWidget):
             self.pl_slider.blockSignals(True)
             self.pl_slider.setValue(pl)
             self.pl_slider.blockSignals(False)
-            self.pl_val.setText(f'{pl}W')
-        if gc >= 180:
+            self.pl_val.setText(f'{pl} W')
+        if gc >= GPU_CLOCK_MIN:
             self.gc_slider.blockSignals(True)
             self.gc_slider.setValue(gc)
             self.gc_slider.blockSignals(False)
@@ -1000,8 +1546,6 @@ class LOQControl(QWidget):
         row = 0
         g.addWidget(self._build_sensors_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_activity_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_proc_manager_card(), row, 0)
-        g.addWidget(self._build_fastfetch_card(), row, 1); row += 1
         g.addWidget(self._build_temp_graph_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_battery_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_profile_card(), row, 0)
@@ -1009,7 +1553,7 @@ class LOQControl(QWidget):
         g.addWidget(self._build_overclock_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_kbd_card(), row, 0)
         g.addWidget(self._build_toggles_card(), row, 1); row += 1
-        g.addWidget(self._build_specs_card(), row, 0, 1, 2); row += 1
+        g.addWidget(self._build_proc_manager_card(), row, 0, 1, 2); row += 1
         g.addWidget(self._build_updates_card(), row, 0, 1, 2)
 
         root.addLayout(g)
@@ -1139,22 +1683,6 @@ class LOQControl(QWidget):
                 }}
             """)
 
-    def _sensor_bar(self, name, mx):
-        row = QHBoxLayout(); row.setSpacing(8)
-        l = QLabel(name); l.setFont(QFont(FONT, 9))
-        l.setStyleSheet(
-            f'color: {T["TEXT_DIM"]}; border: none; background: transparent;')
-        l.setFixedWidth(110); row.addWidget(l)
-        bar = QProgressBar(); bar.setRange(0, mx); bar.setValue(0)
-        bar.setTextVisible(False); bar.setStyleSheet(BAR_STYLE)
-        bar.setFixedHeight(10); row.addWidget(bar)
-        v = QLabel('--'); v.setFont(QFont(FONT, 9, QFont.Bold))
-        v.setStyleSheet(
-            f'color: {T["TEXT"]}; border: none; background: transparent;')
-        v.setFixedWidth(75); v.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        row.addWidget(v)
-        return row, bar, v
-
     def _wide_bar(self, name, mx):
         row = QHBoxLayout(); row.setSpacing(12)
         l = QLabel(name); l.setFont(QFont(FONT, 9))
@@ -1256,43 +1784,59 @@ class LOQControl(QWidget):
         hdr.addWidget(self.throttle_lbl)
         vbox.addLayout(hdr)
 
-        hbox = QHBoxLayout(); hbox.setSpacing(16)
+        self._sensor_tiles = {}
 
-        cpu = QVBoxLayout(); cpu.setSpacing(6)
-        cpu.addWidget(self._sub_header('CPU'))
-        r, self.cpu_util_bar, self.cpu_util_val = self._sensor_bar(
-            'Utilization', 100); cpu.addLayout(r)
-        r, self.cpu_clk_bar, self.cpu_clk_val = self._sensor_bar(
-            'Core Clock', 5500); cpu.addLayout(r)
-        r, self.cpu_tmp_bar, self.cpu_tmp_val = self._sensor_bar(
-            'Temperature', 105); cpu.addLayout(r)
-        r, self.cpu_fan_bar, self.cpu_fan_val = self._sensor_bar(
-            'Fan', 5000); cpu.addLayout(r)
-        cpu.addStretch()
+        # ── CPU group ───────────────────────────────────────────────
+        vbox.addLayout(self._device_subheader(
+            'CPU', cpu_model_short() + f' · {self.n_cores} threads'))
+        cpu_grid = QGridLayout(); cpu_grid.setSpacing(10)
+        cpu_grid.setColumnStretch(0, 1); cpu_grid.setColumnStretch(1, 1)
+        self._sensor_tiles['cpu_util'] = self._make_metric_tile(
+            'CPU UTIL', '#4cc4ff', primary='--%', secondary='peak --',
+            fixed_max=100, fmt=lambda v: f'{int(v)}%')
+        self._sensor_tiles['cpu_clk'] = self._make_metric_tile(
+            'CPU CLOCK', '#a4d3ff', primary='-- MHz', secondary='',
+            fmt=lambda v: f'{int(v)} MHz')
+        self._sensor_tiles['cpu_tmp'] = self._make_metric_tile(
+            'CPU TEMP', '#ff7a7a', primary='--°C', secondary='peak --',
+            fixed_max=105, fmt=lambda v: f'{int(v)}°C')
+        self._sensor_tiles['cpu_fan'] = self._make_metric_tile(
+            'CPU FAN', '#9affc4', primary='-- RPM', secondary='',
+            fmt=lambda v: f'{int(v)} RPM')
+        for i, k in enumerate(['cpu_util', 'cpu_clk', 'cpu_tmp', 'cpu_fan']):
+            cpu_grid.addWidget(self._sensor_tiles[k]['frame'], i // 2, i % 2)
+        vbox.addLayout(cpu_grid)
 
-        sep = QFrame(); sep.setFixedWidth(1)
-        sep.setStyleSheet(f'background: {T["BORDER"]}; border: none;')
+        # ── GPU group ───────────────────────────────────────────────
+        vbox.addLayout(self._device_subheader('GPU', gpu_model_short()))
+        gpu_grid = QGridLayout(); gpu_grid.setSpacing(10)
+        gpu_grid.setColumnStretch(0, 1); gpu_grid.setColumnStretch(1, 1)
+        self._sensor_tiles['gpu_util'] = self._make_metric_tile(
+            'GPU UTIL', '#7cffb4', primary='--%', secondary='peak --',
+            fixed_max=100, fmt=lambda v: f'{int(v)}%')
+        self._sensor_tiles['gpu_clk'] = self._make_metric_tile(
+            'GPU CLOCK', '#a4ffd2', primary='-- MHz', secondary='',
+            fmt=lambda v: f'{int(v)} MHz')
+        self._sensor_tiles['gpu_mem'] = self._make_metric_tile(
+            'GPU MEM CLK', '#c096ff', primary='-- MHz', secondary='',
+            fmt=lambda v: f'{int(v)} MHz')
+        self._sensor_tiles['gpu_tmp'] = self._make_metric_tile(
+            'GPU TEMP', '#ff7a7a', primary='--°C', secondary='peak --',
+            fixed_max=105, fmt=lambda v: f'{int(v)}°C')
+        self._sensor_tiles['gpu_fan'] = self._make_metric_tile(
+            'GPU FAN', '#ffb066', primary='-- RPM', secondary='',
+            fmt=lambda v: f'{int(v)} RPM')
+        for i, k in enumerate(['gpu_util', 'gpu_clk', 'gpu_mem',
+                               'gpu_tmp', 'gpu_fan']):
+            gpu_grid.addWidget(self._sensor_tiles[k]['frame'], i // 2, i % 2)
+        vbox.addLayout(gpu_grid)
 
-        gpu = QVBoxLayout(); gpu.setSpacing(6)
-        gpu.addWidget(self._sub_header('GPU'))
-        r, self.gpu_util_bar, self.gpu_util_val = self._sensor_bar(
-            'Utilization', 100); gpu.addLayout(r)
-        r, self.gpu_clk_bar, self.gpu_clk_val = self._sensor_bar(
-            'Core Clock', 3090); gpu.addLayout(r)
-        r, self.gpu_mem_bar, self.gpu_mem_val = self._sensor_bar(
-            'Memory Clock', 12001); gpu.addLayout(r)
-        r, self.gpu_tmp_bar, self.gpu_tmp_val = self._sensor_bar(
-            'Temperature', 105); gpu.addLayout(r)
-        r, self.gpu_fan_bar, self.gpu_fan_val = self._sensor_bar(
-            'Fan', 5000); gpu.addLayout(r)
-
-        hbox.addLayout(cpu); hbox.addWidget(sep); hbox.addLayout(gpu)
-        vbox.addLayout(hbox)
-
-        cl = QLabel('Per-Core Utilization')
-        cl.setFont(QFont(FONT, 8))
+        # ── Per-core bar chart ──────────────────────────────────────
+        cl = QLabel('PER-CORE UTILIZATION')
+        cl.setFont(QFont(FONT, 8, QFont.Bold))
         cl.setStyleSheet(
-            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
+            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent; '
+            f'letter-spacing: 1.5px; margin-top: 4px;')
         vbox.addWidget(cl)
         self.core_grid = CpuCoreGrid(self.n_cores)
         vbox.addWidget(self.core_grid)
@@ -1311,31 +1855,75 @@ class LOQControl(QWidget):
         hdr.addWidget(self._header('Battery'))
         hdr.addStretch()
         self.batt_status_lbl = QLabel('--')
-        self.batt_status_lbl.setFont(QFont(FONT, 10, QFont.Bold))
+        self.batt_status_lbl.setFont(QFont(FONT, 8, QFont.Bold))
         self.batt_status_lbl.setStyleSheet(
-            f'color: {T["TEXT_DIM"]}; border: none; background: transparent;')
+            f'color: {T["TEXT_MUTED"]}; border: none; '
+            f'background: transparent; letter-spacing: 1.5px; '
+            f'padding: 2px 8px; border-radius: 4px;')
         hdr.addWidget(self.batt_status_lbl)
         vbox.addLayout(hdr)
 
-        r, self.charge_bar, self.charge_val = self._wide_bar(
-            'Charge Level', 100); vbox.addLayout(r)
-        r, self.health_bar, self.health_val = self._wide_bar(
-            'Battery Health', 110); vbox.addLayout(r)
+        # Battery model / design capacity subheader
+        bp = self.bat_path
+        det = '—'
+        if bp:
+            model = (read_sys(f'{bp}/model_name') or '').strip()
+            mfr = (read_sys(f'{bp}/manufacturer') or '').strip()
+            try:
+                design_uwh = int(read_sys(f'{bp}/energy_full_design') or '0')
+                if design_uwh > 0:
+                    design_wh = design_uwh / 1e6
+                    parts = [model] if model else []
+                    if mfr and mfr not in (model or ''):
+                        parts.append(mfr)
+                    parts.append(f'{design_wh:.0f} Wh design')
+                    det = ' · '.join(parts)
+            except (ValueError, TypeError):
+                pass
+        self._battery_subheader = self._device_subheader('CELL', det)
+        vbox.addLayout(self._battery_subheader)
 
-        for name, attr in [('Cycle Count', 'cycles_val'),
-                           ('Power Draw', 'batt_rate_val'),
-                           ('Time Remaining', 'batt_time_val')]:
-            rv, v = self._val_row(name)
-            setattr(self, attr, v)
-            vbox.addLayout(rv)
+        # Tile grid
+        grid = QGridLayout(); grid.setSpacing(10)
+        grid.setColumnStretch(0, 1); grid.setColumnStretch(1, 1)
+        self._batt_tiles = {}
+        self._batt_tiles['charge'] = self._make_metric_tile(
+            'CHARGE', '#9affc4', show_bar=True, bar_max=100,
+            primary='--%', secondary='--',
+            fixed_max=100, fmt=lambda v: f'{int(v)}%')
+        self._batt_tiles['power'] = self._make_metric_tile(
+            'POWER DRAW', '#ffb066',
+            primary='-- W', secondary='peak --',
+            fmt=lambda v: f'{v:.1f} W')
+        self._batt_tiles['health'] = self._make_metric_tile(
+            'HEALTH', '#4cc4ff', show_bar=True, bar_max=100,
+            primary='--%', secondary='--',
+            fixed_max=100, fmt=lambda v: f'{int(v)}%')
+        # Tweak: HEALTH spark logs to per-day; usually flat in-session,
+        # so present it without active sparkline by hiding it.
+        self._batt_tiles['health']['spark'].setVisible(False)
+        self._batt_tiles['cycles'] = self._make_metric_tile(
+            'CYCLES', '#c096ff',
+            primary='--', secondary='—',
+            fmt=lambda v: f'{int(v)}')
+        self._batt_tiles['cycles']['spark'].setVisible(False)
+        grid.addWidget(self._batt_tiles['charge']['frame'], 0, 0)
+        grid.addWidget(self._batt_tiles['power']['frame'], 0, 1)
+        grid.addWidget(self._batt_tiles['health']['frame'], 1, 0)
+        grid.addWidget(self._batt_tiles['cycles']['frame'], 1, 1)
+        vbox.addLayout(grid)
 
+        # History caption
         self.batt_hist_lbl = self._info('')
+        self.batt_hist_lbl.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; '
+            f'background: transparent; padding-top: 4px;')
         vbox.addWidget(self.batt_hist_lbl)
         hist = battery_history_summary()
         if hist:
             self.batt_hist_lbl.setText(
-                f'Tracking since {hist["since"]} '
-                f'({hist["n"]} logs, started at {hist["first_h"]}% health)')
+                f'// tracking since {hist["since"]} · {hist["n"]} entries · '
+                f'started at {hist["first_h"]}% health')
 
         sep = QFrame(); sep.setFixedHeight(1)
         sep.setStyleSheet(f'background: {T["BORDER"]}; border: none;')
@@ -1380,17 +1968,26 @@ class LOQControl(QWidget):
             sep = QFrame(); sep.setFixedHeight(1)
             sep.setStyleSheet(f'background: {T["BORDER"]}; border: none;')
             vbox.addWidget(sep)
-            r, self.tdp_slider, self.tdp_val = self._slider_row(
-                'CPU Power Limit', 5, self.rapl[1], self.rapl[0], 'W')
-            self.tdp_slider.valueChanged.connect(
-                lambda v: self.tdp_val.setText(f'{v}W'))
-            self.tdp_slider.sliderReleased.connect(self._apply_tdp)
-            vbox.addLayout(r)
             tdp_max = self.rapl[1]
-            vbox.addLayout(self._slider_markers([
-                (0, '5W min'), (55 / tdp_max, '55W TDP'),
-                (0.5, f'{tdp_max // 2}W'),
-                (1.0, f'{tdp_max}W max')]))
+            tdp_default = self.rapl[0]
+            # Reasonable mid-range tick
+            mid = (tdp_max // 10) * 5  # round down to a multiple of 5
+            tdp_panel, self.tdp_slider, self.tdp_val, self.tdp_auto_btn = (
+                self._oc_panel(
+                    'CPU POWER LIMIT', 5, tdp_max, tdp_default,
+                    value_fmt=lambda v: f'{int(v)} W',
+                    snap=5, tick_interval=5, major_tick_every=25,
+                    ticks=[(5, '5'), (25, '25'),
+                           (mid, str(mid)),
+                           (tdp_max, str(tdp_max))],
+                    hint=f'5 W steps · current default {tdp_default} W · '
+                         f'AUTO = factory default',
+                    auto_value=tdp_default,
+                    on_auto=self._cpu_tdp_auto))
+            self.tdp_slider.valueChanged.connect(
+                lambda v: self.tdp_val.setText(f'{v} W'))
+            self.tdp_slider.sliderReleased.connect(self._apply_tdp)
+            vbox.addWidget(tdp_panel)
 
         vbox.addStretch()
         return card
@@ -1421,62 +2018,68 @@ class LOQControl(QWidget):
         hdr = QHBoxLayout()
         hdr.addWidget(self._header('GPU Overclock'))
         hdr.addStretch()
-        note = QLabel('Does not persist across reboots')
+        note = QLabel('// resets on reboot')
         note.setFont(QFont(FONT, 8))
         note.setStyleSheet(
-            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
+            f'color: {T["TEXT_MUTED"]}; border: none; '
+            f'background: transparent; letter-spacing: 1px;')
         hdr.addWidget(note)
         vbox.addLayout(hdr)
-
-        tip = QLabel(
-            'Tip: Power 80-100W for gaming. Lock GPU clock above 2000 MHz '
-            'to prevent downclocking. Memory 11-12 GHz for max bandwidth. '
-            'Keep temps below 82\u00b0C. '
-            'Run: sudo systemctl enable nvidia-powerd')
-        tip.setFont(QFont(FONT, 8)); tip.setWordWrap(True)
-        tip.setStyleSheet(
-            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent; '
-            f'padding: 4px 0;')
-        vbox.addWidget(tip)
         self.oc_status = self._info()
         vbox.addWidget(self.oc_status)
 
-        r1, self.pl_slider, self.pl_val = self._slider_row(
-            'Power Limit', 5, 100, 45, 'W')
+        # \u2500\u2500 Power Limit \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        pl_panel, self.pl_slider, self.pl_val, self.pl_auto_btn = (
+            self._oc_panel(
+                'POWER LIMIT', 5, 100, 45,
+                value_fmt=lambda v: f'{int(v)} W',
+                snap=5, tick_interval=5, major_tick_every=25,
+                ticks=[(5, '5'), (25, '25'), (50, '50'),
+                       (75, '75'), (100, '100')],
+                hint='5 W steps \u00b7 80 W sweet spot \u00b7 '
+                     'AUTO = factory default',
+                auto_value=45,  # placeholder \u2014 updated by refresh_overclock
+                on_auto=self._gpu_pl_auto))
         self.pl_slider.valueChanged.connect(
-            lambda v: self.pl_val.setText(f'{v}W'))
+            lambda v: self.pl_val.setText(f'{v} W'))
         self.pl_slider.sliderReleased.connect(self._apply_power_limit)
-        vbox.addLayout(r1)
-        vbox.addLayout(self._slider_markers([
-            (0.42, '45W base'), (0.79, '80W gaming'), (1.0, '100W max')]))
+        vbox.addWidget(pl_panel)
 
-        r2, self.gc_slider, self.gc_val = self._slider_row(
-            'GPU Clock Min', 0, 3090, 0, '')
-        self.gc_val.setText('Auto')
+        # \u2500\u2500 GPU Clock Min \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        gc_panel, self.gc_slider, self.gc_val, _ = self._oc_panel(
+            'GPU CLOCK MIN', 0, 3090, 0,
+            value_fmt=lambda v: ('Auto' if v < GPU_CLOCK_MIN
+                                 else f'{int(v)} MHz'),
+            snap_fn=_gpu_clock_snap, tick_interval=200,
+            major_tick_every=200,
+            ticks=[(0, 'Auto'),
+                   (1000, '1000'), (1500, '1500'),
+                   (2000, '2000'), (2500, '2500'), (3090, '3090')],
+            hint='5 MHz steps \u00b7 lock above 2000 MHz to stop downclocks',
+            auto_value=0, on_auto=self._apply_gpu_clock)
         self.gc_slider.valueChanged.connect(self._on_gc_change)
         self.gc_slider.sliderReleased.connect(self._apply_gpu_clock)
-        vbox.addLayout(r2)
-        vbox.addLayout(self._slider_markers([
-            (0, 'Auto'), (0.68, '2100 gaming'), (0.78, '2400 aggr.'),
-            (1.0, '3090 max')]))
+        vbox.addWidget(gc_panel)
 
-        r3, self.mc_slider, self.mc_val = self._slider_row(
-            'Memory Clock', 0, 3, 0, '')
-        self.mc_val.setText('Auto')
-        self.mc_slider.setTickPosition(QSlider.TicksBelow)
-        self.mc_slider.setTickInterval(1)
-        self.mc_slider.setSingleStep(1)
-        self.mc_slider.setPageStep(1)
+        # \u2500\u2500 Memory Clock \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        mc_panel, self.mc_slider, self.mc_val, _ = self._oc_panel(
+            'MEMORY CLOCK', 0, 3, 0,
+            value_fmt=lambda v: MEM_LABELS[int(v)],
+            snap=1, tick_interval=1, major_tick_every=1,
+            ticks=[(0, 'Auto'),
+                   (1, '9 GHz'), (2, '11 GHz'), (3, '12 GHz')],
+            hint='Discrete steps \u00b7 11\u201312 GHz for max bandwidth',
+            auto_value=0, on_auto=self._apply_mem_clock)
         self.mc_slider.valueChanged.connect(self._on_mc_change)
         self.mc_slider.sliderReleased.connect(self._apply_mem_clock)
-        vbox.addLayout(r3)
-        vbox.addLayout(self._slider_markers([
-            (0, 'Auto'), (0.33, '9 GHz safe'), (0.67, '11 GHz gaming'),
-            (1.0, '12 GHz max')]))
+        vbox.addWidget(mc_panel)
 
-        reset = self._btn('Reset All Defaults')
+        # \u2500\u2500 Actions row \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        actions = QHBoxLayout(); actions.setSpacing(10)
+        reset = self._btn('Reset to Defaults')
         reset.clicked.connect(self._reset_overclock)
-        vbox.addWidget(reset)
+        actions.addWidget(reset)
+        vbox.addLayout(actions)
 
         sep = QFrame(); sep.setFixedHeight(1)
         sep.setStyleSheet(f'background: {T["BORDER"]}; border: none;')
@@ -1489,6 +2092,119 @@ class LOQControl(QWidget):
         vbox.addWidget(self._info(
             'Saves current overclock and applies it when the app starts'))
         return card
+
+    def _oc_panel(self, title, lo, hi, default, value_fmt,
+                  snap=None, snap_fn=None, tick_interval=None,
+                  major_tick_every=None, ticks=None, hint=None,
+                  auto_value=None, on_auto=None):
+        """Build a card-style overclock control panel.
+
+        ticks: list of (value, label) drawn under the slider, aligned to
+        the slider's actual track geometry via SliderTicks.
+        auto_value / on_auto: enable an "Auto" chip in the header that
+        sets the slider to auto_value and (optionally) calls on_auto().
+        """
+        panel = QFrame()
+        panel.setStyleSheet(
+            f'QFrame {{ background: {T["BG"]}; '
+            f'border: 1px solid {T["BORDER"]}; border-radius: 6px; }}')
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(14, 12, 14, 12); lay.setSpacing(8)
+
+        hdr = QHBoxLayout(); hdr.setSpacing(8)
+        name = QLabel(title)
+        name.setFont(QFont(FONT, 8, QFont.Bold))
+        name.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; '
+            f'background: transparent; letter-spacing: 1.5px;')
+        hdr.addWidget(name)
+        hdr.addStretch()
+        auto_btn = None
+        if auto_value is not None:
+            auto_btn = QPushButton('AUTO')
+            auto_btn.setFont(QFont(FONT, 7, QFont.Bold))
+            auto_btn.setCursor(Qt.PointingHandCursor)
+            auto_btn.setFixedHeight(20)
+            # Pre-baked stylesheets for the two states. Swapped directly
+            # via setStyleSheet — Qt re-applies stylesheets reliably this
+            # way; the dynamic-property approach (setProperty + polish)
+            # is finicky across themes / Qt versions.
+            auto_btn._style_off = (
+                f'QPushButton {{ background: transparent; '
+                f'color: {T["TEXT_MUTED"]}; '
+                f'border: 1px solid {T["BORDER"]}; border-radius: 3px; '
+                f'padding: 0 8px; letter-spacing: 1.5px; }} '
+                f'QPushButton:hover {{ color: {T["TEXT"]}; '
+                f'border-color: {T["TEXT_DIM"]}; }}')
+            auto_btn._style_on = (
+                f'QPushButton {{ background: {T["BTN_ACT"]}; '
+                f'color: {T["BTN_ACT_T"]}; '
+                f'border: 1px solid {T["BTN_ACT"]}; border-radius: 3px; '
+                f'padding: 0 8px; letter-spacing: 1.5px; }} '
+                f'QPushButton:hover {{ background: {T["BTN_ACT_H"]}; }}')
+            auto_btn.setStyleSheet(auto_btn._style_off)
+            hdr.addWidget(auto_btn)
+        val = QLabel(value_fmt(default))
+        val.setFont(QFont(FONT, 14, QFont.Bold))
+        val.setStyleSheet(
+            f'color: {T["TEXT"]}; border: none; background: transparent;')
+        val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        hdr.addWidget(val)
+        lay.addLayout(hdr)
+
+        s = NoScrollSlider(Qt.Horizontal)
+        s.setRange(lo, hi); s.setValue(default)
+        s.setStyleSheet(OC_SLIDER_STYLE)
+        if snap is not None:
+            s.setSnap(snap)
+        if snap_fn is not None:
+            s.setSnapFn(snap_fn)
+        if tick_interval is not None and tick_interval >= 1:
+            s.setTickPosition(QSlider.TicksBelow)
+            s.setTickInterval(tick_interval)
+            if major_tick_every:
+                s.setSingleStep(major_tick_every)
+                s.setPageStep(major_tick_every)
+        lay.addWidget(s)
+
+        if ticks:
+            lay.addWidget(SliderTicks(s, ticks))
+
+        if hint:
+            h = QLabel(hint)
+            h.setFont(QFont(FONT, 8))
+            h.setStyleSheet(
+                f'color: {T["TEXT_MUTED"]}; border: none; '
+                f'background: transparent;')
+            h.setWordWrap(True)
+            lay.addWidget(h)
+
+        if auto_btn is not None:
+            auto_btn._auto_value = auto_value
+
+            def _update_active(v=None):
+                if v is None:
+                    v = s.value()
+                is_auto = v == auto_btn._auto_value
+                auto_btn.setStyleSheet(
+                    auto_btn._style_on if is_auto else auto_btn._style_off)
+            auto_btn._update_active = _update_active
+
+            def _do_auto():
+                s.blockSignals(True)
+                s.setValue(auto_btn._auto_value)
+                s.blockSignals(False)
+                val.setText(value_fmt(s.value()))
+                _update_active()
+                if on_auto:
+                    on_auto()
+
+            s.valueChanged.connect(_update_active)
+            s.sliderReleased.connect(_update_active)
+            auto_btn.clicked.connect(_do_auto)
+            _update_active()
+
+        return panel, s, val, auto_btn
 
     def _build_proc_manager_card(self):
         card, vbox = self._card()
@@ -1509,26 +2225,6 @@ class LOQControl(QWidget):
             self._proc_manager = ProcessManagerWindow(self)
         self._proc_manager.show()
         self._proc_manager.activateWindow()
-
-    def _build_fastfetch_card(self):
-        card, vbox = self._card()
-        hdr = QHBoxLayout()
-        hdr.addWidget(self._header('System Info'))
-        hdr.addStretch()
-        btn = self._btn('Open', fs=9)
-        btn.setFixedSize(80, 30)
-        btn.clicked.connect(self._open_fastfetch)
-        hdr.addWidget(btn)
-        vbox.addLayout(hdr)
-        vbox.addWidget(self._info(
-            'Live fastfetch system overview'))
-        return card
-
-    def _open_fastfetch(self):
-        if self._fastfetch_win is None or not self._fastfetch_win.isVisible():
-            self._fastfetch_win = FastfetchWindow(self)
-        self._fastfetch_win.show()
-        self._fastfetch_win.activateWindow()
 
     def _build_kbd_card(self):
         card, vbox = self._card()
@@ -1580,143 +2276,229 @@ class LOQControl(QWidget):
     def _build_activity_card(self):
         card, vbox = self._card()
         vbox.addWidget(self._header('Activity Monitor'))
-        r, self.ram_bar, self.ram_val = self._wide_bar('RAM Usage', 100)
-        vbox.addLayout(r)
-        for name, attr in [('Disk Read', 'disk_r_val'),
-                           ('Disk Write', 'disk_w_val'),
-                           ('Network Down', 'net_rx_val'),
-                           ('Network Up', 'net_tx_val')]:
-            rv, v = self._val_row(name)
-            setattr(self, attr, v)
-            vbox.addLayout(rv)
-        return card
 
-    def _build_specs_card(self):
-        card, vbox = self._card()
-        hdr = QHBoxLayout()
-        hdr.addWidget(self._header('Specifications'))
-        hdr.addStretch()
-        exp = self._btn('Export', fs=8)
-        exp.setFixedSize(70, 28)
-        exp.clicked.connect(self.export_specs)
-        hdr.addWidget(exp)
-        vbox.addLayout(hdr)
+        self._activity_tiles = {}
+        self._activity_order = []  # explicit order list
+        self.activity_grid = QGridLayout()
+        self.activity_grid.setSpacing(10)
+        self.activity_grid.setColumnStretch(0, 1)
+        self.activity_grid.setColumnStretch(1, 1)
 
-        self._spec_lines = []
-
-        def _spec(label, value):
-            row = QHBoxLayout(); row.setSpacing(12)
-            l = QLabel(label); l.setFont(QFont(FONT, 9))
-            l.setStyleSheet(
-                f'color: {T["TEXT_DIM"]}; border: none; '
-                f'background: transparent;')
-            l.setFixedWidth(150); row.addWidget(l)
-            v = QLabel(value); v.setFont(QFont(FONT, 9, QFont.Bold))
-            v.setStyleSheet(
-                f'color: {T["TEXT"]}; border: none; background: transparent;')
-            v.setWordWrap(True); row.addWidget(v)
-            self._spec_lines.append((label, value))
-            return row
-
-        cpu_model = ''
-        try:
-            with open('/proc/cpuinfo') as f:
-                for line in f:
-                    if line.startswith('model name'):
-                        cpu_model = line.split(':')[1].strip(); break
-        except Exception:
-            pass
-        cores = run_output(['nproc'])
-        vbox.addLayout(_spec('CPU', f'{cpu_model} ({cores} threads)'))
-
-        gpu_name = nvidia_query('name')[0]
-        gpu_vram = nvidia_query('memory.total')[0]
-        if gpu_name:
-            gt = gpu_name + (f' ({gpu_vram} MiB)' if gpu_vram else '')
-            vbox.addLayout(_spec('GPU', gt))
-
+        # Memory subheader
         try:
             with open('/proc/meminfo') as f:
+                total_kb = 0
                 for line in f:
                     if line.startswith('MemTotal:'):
-                        gb = round(int(line.split()[1]) / 1024 / 1024)
-                        vbox.addLayout(_spec('RAM', f'{gb} GB')); break
+                        total_kb = int(line.split()[1]); break
+            ram_total_str = f'{round(total_kb / 1048576)} GB'
         except Exception:
-            pass
+            ram_total_str = ''
+        vbox.addLayout(self._device_subheader('MEMORY', ram_total_str))
 
-        try:
-            r = subprocess.run(['lsblk', '-d', '-o', 'NAME,SIZE,MODEL', '-n'],
-                               capture_output=True, text=True, timeout=5)
-            for line in r.stdout.strip().split('\n'):
-                p = line.split(None, 2)
-                if len(p) >= 3 and p[0].startswith('nvme'):
-                    vbox.addLayout(
-                        _spec(f'/dev/{p[0]}', f'{p[2].strip()} ({p[1]})'))
-        except Exception:
-            pass
+        self._activity_tiles['ram'] = self._make_metric_tile(
+            'RAM', '#4cc4ff', show_bar=True, bar_max=100,
+            primary='-- / -- GB', secondary='--', fixed_max=100,
+            fmt=lambda v: f'{int(v)}%')
+        self._activity_order.append('ram')
+        # Swap is added lazily by refresh if SwapTotal > 0
 
-        try:
-            r = subprocess.run(
-                ['df', '-h', '--output=target,size,used,avail,pcent'],
-                capture_output=True, text=True, timeout=5)
-            for line in r.stdout.strip().split('\n')[1:]:
-                p = line.split()
-                if len(p) == 5 and p[0] in ('/', '/media/ojee/NVME'):
-                    name = 'Root (/)' if p[0] == '/' else p[0].split('/')[-1]
-                    vbox.addLayout(
-                        _spec(name, f'{p[2]} / {p[1]} ({p[4]} used)'))
-        except Exception:
-            pass
+        self._mem_grid = QGridLayout(); self._mem_grid.setSpacing(10)
+        self._mem_grid.setColumnStretch(0, 1); self._mem_grid.setColumnStretch(1, 1)
+        vbox.addLayout(self._mem_grid)
 
-        def _sep():
-            s = QFrame(); s.setFixedHeight(1)
-            s.setStyleSheet(f'background: {T["BORDER"]}; border: none;')
-            vbox.addWidget(s)
+        # Storage subheader — populated adaptively per drive
+        self._storage_header = self._device_subheader('STORAGE', '')
+        vbox.addLayout(self._storage_header)
+        self._storage_grid = QGridLayout(); self._storage_grid.setSpacing(10)
+        self._storage_grid.setColumnStretch(0, 1); self._storage_grid.setColumnStretch(1, 1)
+        vbox.addLayout(self._storage_grid)
+        self._drive_tiles = {}  # dev -> tile dict
+        self._prev_drive_stats = {}  # dev -> (r, w)
 
-        _sep()
-        try:
-            for drm in sorted(glob.glob('/sys/class/drm/card*-*')):
-                if read_sys(f'{drm}/status') == 'connected':
-                    name = drm.split('/')[-1].split('-', 1)[1]
-                    mode = read_sys(f'{drm}/modes').split('\n')[0]
-                    vbox.addLayout(_spec('Display', f'{name}  {mode}'))
-        except Exception:
-            pass
+        # Network subheader — populated adaptively per interface
+        self._network_header = self._device_subheader('NETWORK', '')
+        vbox.addLayout(self._network_header)
+        self._network_grid = QGridLayout(); self._network_grid.setSpacing(10)
+        self._network_grid.setColumnStretch(0, 1); self._network_grid.setColumnStretch(1, 1)
+        vbox.addLayout(self._network_grid)
+        self._nic_tiles = {}  # iface -> tile dict
+        self._prev_nic_stats = {}  # iface -> (rx, tx)
 
-        _sep()
-        wifi = ''
-        try:
-            r = subprocess.run(['iw', 'dev'], capture_output=True,
-                               text=True, timeout=5)
-            for line in r.stdout.split('\n'):
-                if 'ssid' in line.lower():
-                    wifi = line.split('ssid')[1].strip(); break
-        except Exception:
-            pass
-        if wifi:
-            vbox.addLayout(_spec('Wi-Fi', wifi))
-        try:
-            r = subprocess.run(['ip', '-br', 'link', 'show'],
-                               capture_output=True, text=True, timeout=5)
-            for line in r.stdout.strip().split('\n'):
-                p = line.split()
-                if len(p) >= 2 and p[0] not in ('lo', 'tailscale0') \
-                        and not p[0].startswith('wl'):
-                    vbox.addLayout(_spec(p[0], p[1]))
-        except Exception:
-            pass
-        bt = ''
-        try:
-            r = subprocess.run(['bluetoothctl', 'show'],
-                               capture_output=True, text=True, timeout=5)
-            for line in r.stdout.split('\n'):
-                if 'Powered:' in line:
-                    bt = 'On' if 'yes' in line else 'Off'; break
-        except Exception:
-            pass
-        if bt:
-            vbox.addLayout(_spec('Bluetooth', bt))
+        self._layout_memory_tiles()
         return card
+
+    def _layout_memory_tiles(self):
+        while self._mem_grid.count():
+            it = self._mem_grid.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                self._mem_grid.removeWidget(w)
+        i = 0
+        for key in self._activity_order:
+            tile = self._activity_tiles.get(key)
+            if tile is None:
+                continue
+            self._mem_grid.addWidget(tile['frame'], i // 2, i % 2)
+            i += 1
+
+    def _ensure_drive_tile(self, dev, model, size):
+        if dev in self._drive_tiles:
+            return self._drive_tiles[dev]
+        size_str = fmt_bytes(size)
+        label = f'/dev/{dev}'.upper()
+        tile = self._make_metric_tile(
+            label, '#ffb066',
+            primary='R -- · W --',
+            secondary=(model[:24] + '…') if len(model) > 25 else (model or size_str),
+            fmt=lambda v: fmt_rate(int(v)))
+        # Capacity bar shows used %; rates feed sparkline
+        tile['cap_bar'] = QProgressBar()
+        tile['cap_bar'].setRange(0, 100); tile['cap_bar'].setTextVisible(False)
+        tile['cap_bar'].setFixedHeight(4)
+        tile['cap_bar'].setStyleSheet(
+            f'QProgressBar {{ background: {T["BORDER"]}; border: none; '
+            f'border-radius: 2px; }} '
+            f'QProgressBar::chunk {{ background: #ffb066; '
+            f'border-radius: 2px; }}')
+        tile['cap_label'] = QLabel('-- / -- · --°C')
+        tile['cap_label'].setFont(QFont(FONT, 8))
+        tile['cap_label'].setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; '
+            f'background: transparent;')
+        lay = tile['frame'].layout()
+        lay.insertWidget(lay.count() - 1, tile['cap_bar'])
+        lay.insertWidget(lay.count() - 1, tile['cap_label'])
+        tile['size'] = size
+        tile['model'] = model
+        self._drive_tiles[dev] = tile
+        return tile
+
+    def _ensure_nic_tile(self, iface, kind, ssid, ip):
+        if iface in self._nic_tiles:
+            tile = self._nic_tiles[iface]
+            # update info line if changed
+            tile['info'].setText(self._nic_info_text(kind, ssid, ip))
+            return tile
+        color = {'wifi': '#7cffb4', 'eth': '#4cc4ff',
+                 'vpn': '#c096ff'}.get(kind, '#a0a0a0')
+        label = iface.upper()
+        tile = self._make_metric_tile(
+            label, color, primary='↓ -- · ↑ --',
+            secondary=kind.upper(),
+            fmt=lambda v: fmt_rate(int(v)))
+        info = QLabel(self._nic_info_text(kind, ssid, ip))
+        info.setFont(QFont(FONT, 8))
+        info.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; '
+            f'background: transparent;')
+        lay = tile['frame'].layout()
+        lay.insertWidget(lay.count() - 1, info)
+        tile['info'] = info
+        tile['kind'] = kind
+        self._nic_tiles[iface] = tile
+        return tile
+
+    def _nic_info_text(self, kind, ssid, ip):
+        bits = []
+        if kind == 'wifi' and ssid:
+            bits.append(ssid)
+        if ip:
+            bits.append(ip)
+        return ' · '.join(bits) if bits else 'no address'
+
+    def _relayout_drive_tiles(self):
+        while self._storage_grid.count():
+            it = self._storage_grid.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                self._storage_grid.removeWidget(w)
+        for i, dev in enumerate(sorted(self._drive_tiles.keys())):
+            tile = self._drive_tiles[dev]
+            self._storage_grid.addWidget(tile['frame'], i // 2, i % 2)
+
+    def _relayout_nic_tiles(self):
+        while self._network_grid.count():
+            it = self._network_grid.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                self._network_grid.removeWidget(w)
+        # ordering: physical first (wifi, eth), then vpn, then other
+        order_key = {'wifi': 0, 'eth': 1, 'vpn': 2, 'other': 3}
+        keys = sorted(self._nic_tiles.keys(),
+                      key=lambda k: (order_key.get(self._nic_tiles[k].get('kind', 'other'), 9), k))
+        for i, iface in enumerate(keys):
+            self._network_grid.addWidget(self._nic_tiles[iface]['frame'], i // 2, i % 2)
+
+    def _device_subheader(self, name, detail):
+        row = QHBoxLayout(); row.setSpacing(8)
+        nm = QLabel(name)
+        nm.setFont(QFont(FONT, 9, QFont.Bold))
+        nm.setStyleSheet(
+            f'color: {T["TEXT"]}; border: none; background: transparent; '
+            f'letter-spacing: 2px;')
+        row.addWidget(nm)
+        dt = QLabel(detail)
+        dt.setFont(QFont(FONT, 8))
+        dt.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; '
+            f'background: transparent;')
+        row.addWidget(dt)
+        row.addStretch()
+        row.detail_label = dt
+        return row
+
+    def _set_subheader_detail(self, row, text):
+        lbl = getattr(row, 'detail_label', None)
+        if lbl is not None:
+            lbl.setText(text)
+
+    def _make_metric_tile(self, label, color, show_bar=False, bar_max=100,
+                          primary='--', secondary='', fixed_max=None,
+                          fmt=None):
+        frame = QFrame()
+        frame.setStyleSheet(
+            f'QFrame {{ background: {T["BG"]}; '
+            f'border: 1px solid {T["BORDER"]}; border-radius: 6px; }}')
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(12, 10, 12, 10); lay.setSpacing(6)
+        top = QHBoxLayout(); top.setSpacing(8)
+        lbl = QLabel(label)
+        lbl.setFont(QFont(FONT, 8, QFont.Bold))
+        lbl.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent; '
+            f'letter-spacing: 1.5px;')
+        top.addWidget(lbl)
+        top.addStretch()
+        sec = QLabel(secondary)
+        sec.setFont(QFont(FONT, 8))
+        sec.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
+        top.addWidget(sec)
+        lay.addLayout(top)
+        pri = QLabel(primary)
+        pri.setFont(QFont(FONT, 12, QFont.Bold))
+        pri.setStyleSheet(
+            f'color: {T["TEXT"]}; border: none; background: transparent;')
+        lay.addWidget(pri)
+        bar = None
+        if show_bar:
+            bar = QProgressBar()
+            bar.setRange(0, bar_max)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(4)
+            bar.setStyleSheet(
+                f'QProgressBar {{ background: {T["BORDER"]}; border: none; '
+                f'border-radius: 2px; }} '
+                f'QProgressBar::chunk {{ background: {color}; '
+                f'border-radius: 2px; }}')
+            lay.addWidget(bar)
+        spark = Sparkline(color=color, height=46, fixed_max=fixed_max,
+                          fmt=fmt)
+        lay.addWidget(spark)
+        return {'frame': frame, 'label': lbl, 'primary': pri,
+                'secondary': sec, 'bar': bar, 'spark': spark,
+                'peak': 0.0}
 
     def _build_updates_card(self):
         card, vbox = self._card()
@@ -1751,63 +2533,69 @@ class LOQControl(QWidget):
         self.refresh_sysinfo()
 
     def refresh_sensors(self):
+        # CPU utilization
         cur = read_cpu_stat()
         prev = self._prev_stat; self._prev_stat = cur
         dt = cur[0] - prev[0]; di = cur[1] - prev[1]
         pct = max(0, min(100, round((1 - di / dt) * 100))) if dt > 0 else 0
-        self.cpu_util_bar.setValue(pct); self.cpu_util_val.setText(f'{pct}%')
+        self._set_sensor('cpu_util', pct, f'{pct}%', 'peak {p}%')
 
+        # Per-core
         cur_cores = read_per_core_stats()
         prev_cores = self._prev_cores; self._prev_cores = cur_cores
         core_pcts = []
         for i in range(min(len(cur_cores), len(prev_cores))):
             cdt = cur_cores[i][0] - prev_cores[i][0]
             cdi = cur_cores[i][1] - prev_cores[i][1]
-            cp = max(0, min(100, round((1 - cdi / cdt) * 100))) if cdt > 0 else 0
+            cp = (max(0, min(100, round((1 - cdi / cdt) * 100)))
+                  if cdt > 0 else 0)
             core_pcts.append(cp)
         self.core_grid.set_values(core_pcts)
 
+        # CPU clock
         try:
             freq = max(
                 (int(read_sys(f) or '0') for f in self.cpu_freq_paths),
                 default=0) // 1000
-            self.cpu_clk_bar.setValue(freq)
-            self.cpu_clk_val.setText(
-                f'{freq / 1000:.1f} GHz' if freq >= 1000 else f'{freq} MHz')
+            txt = (f'{freq / 1000:.1f} GHz' if freq >= 1000
+                   else f'{freq} MHz')
+            self._set_sensor('cpu_clk', freq, txt)
         except (ValueError, TypeError):
-            self.cpu_clk_val.setText('--')
+            pass
 
+        # CPU temp
         cpu_temp = 0
         try:
             raw = read_sys(f'{self.cpu_zone}/temp')
             cpu_temp = int(raw) // 1000 if raw else 0
-            self.cpu_tmp_bar.setValue(cpu_temp)
-            self.cpu_tmp_val.setText(f'{cpu_temp}\u00b0C')
+            self._set_sensor('cpu_tmp', cpu_temp,
+                             f'{cpu_temp}\u00b0C', 'peak {p}\u00b0C')
         except (ValueError, TypeError):
-            self.cpu_tmp_val.setText('--')
+            pass
 
+        # Fans
         cpu_rpm, gpu_rpm = read_fan_rpm()
-        self.cpu_fan_bar.setValue(cpu_rpm)
-        self.cpu_fan_val.setText(f'{cpu_rpm} RPM')
+        self._set_sensor('cpu_fan', cpu_rpm, f'{cpu_rpm} RPM')
+        self._set_sensor('gpu_fan', gpu_rpm, f'{gpu_rpm} RPM')
 
+        # GPU group
         gpu_temp = 0
         vals = nvidia_query([
             'utilization.gpu', 'clocks.current.graphics',
             'clocks.current.memory', 'temperature.gpu'])
-        for i, (bar, lbl, suf) in enumerate([
-            (self.gpu_util_bar, self.gpu_util_val, '%'),
-            (self.gpu_clk_bar, self.gpu_clk_val, ' MHz'),
-            (self.gpu_mem_bar, self.gpu_mem_val, ' MHz'),
-            (self.gpu_tmp_bar, self.gpu_tmp_val, '\u00b0C')]):
+        for i, (k, suf, peak_fmt) in enumerate([
+                ('gpu_util', '%', 'peak {p}%'),
+                ('gpu_clk', ' MHz', None),
+                ('gpu_mem', ' MHz', None),
+                ('gpu_tmp', '\u00b0C', 'peak {p}\u00b0C')]):
             try:
-                v = int(vals[i]); bar.setValue(v); lbl.setText(f'{v}{suf}')
-                if i == 3:
+                v = int(vals[i])
+                self._set_sensor(k, v, f'{v}{suf}', peak_fmt)
+                if k == 'gpu_tmp':
                     gpu_temp = v
             except (ValueError, IndexError):
-                lbl.setText('--')
+                pass
 
-        self.gpu_fan_bar.setValue(gpu_rpm)
-        self.gpu_fan_val.setText(f'{gpu_rpm} RPM')
         self.temp_graph.add(cpu_temp, gpu_temp)
 
         # Throttle — only flag if actively increasing
@@ -1834,46 +2622,161 @@ class LOQControl(QWidget):
 
         self.refresh_activity()
 
+    def _set_sensor(self, key, value, text, peak_fmt=None):
+        tile = self._sensor_tiles.get(key)
+        if not tile:
+            return
+        tile['primary'].setText(text)
+        tile['spark'].add(value)
+        tile['peak'] = max(tile['peak'], value)
+        if peak_fmt:
+            tile['secondary'].setText(peak_fmt.format(p=int(tile['peak'])))
+
     def refresh_activity(self):
         now = time.monotonic()
         elapsed = max(now - self._prev_time, 0.1)
         self._prev_time = now
 
+        # ── Memory ──────────────────────────────────────────────────
+        mem = self._read_meminfo()
+        ram_total = mem.get('MemTotal', 1)
+        ram_avail = mem.get('MemAvailable', 0)
+        ram_used = ram_total - ram_avail
+        ram_pct = round(ram_used / ram_total * 100) if ram_total else 0
+        cached = mem.get('Cached', 0) + mem.get('Buffers', 0)
+        ram_tile = self._activity_tiles['ram']
+        if ram_tile['bar'] is not None:
+            ram_tile['bar'].setValue(ram_pct)
+        ram_tile['primary'].setText(
+            f'{ram_used / 1048576:.1f} / {ram_total / 1048576:.0f} GB')
+        ram_tile['secondary'].setText(
+            f'{ram_pct}% · cache {cached / 1048576:.1f} GB')
+        ram_tile['spark'].add(ram_pct)
+
+        swap_total = mem.get('SwapTotal', 0)
+        swap_free = mem.get('SwapFree', 0)
+        if swap_total > 0:
+            if 'swap' not in self._activity_tiles:
+                self._activity_tiles['swap'] = self._make_metric_tile(
+                    'SWAP', '#c096ff', show_bar=True, bar_max=100,
+                    primary='-- / -- GB', secondary='--',
+                    fixed_max=100, fmt=lambda v: f'{int(v)}%')
+                self._activity_order.append('swap')
+                self._layout_memory_tiles()
+            swap_used = swap_total - swap_free
+            swap_pct = (round(swap_used / swap_total * 100)
+                        if swap_total else 0)
+            swap_tile = self._activity_tiles['swap']
+            if swap_tile['bar'] is not None:
+                swap_tile['bar'].setValue(swap_pct)
+            swap_tile['primary'].setText(
+                f'{swap_used / 1048576:.1f} / '
+                f'{swap_total / 1048576:.0f} GB')
+            swap_tile['secondary'].setText(f'{swap_pct}%')
+            swap_tile['spark'].add(swap_pct)
+        elif 'swap' in self._activity_tiles:
+            self._activity_tiles['swap']['frame'].setParent(None)
+            del self._activity_tiles['swap']
+            self._activity_order.remove('swap')
+            self._layout_memory_tiles()
+
+        # ── Storage (per-drive) ─────────────────────────────────────
+        drives = list_drives()
+        current_devs = {d['dev'] for d in drives}
+        for dev in list(self._drive_tiles.keys()):
+            if dev not in current_devs:
+                self._drive_tiles[dev]['frame'].setParent(None)
+                del self._drive_tiles[dev]
+                self._prev_drive_stats.pop(dev, None)
+        cur_disk = read_disk_stats()
+        relayout = False
+        for d in drives:
+            dev = d['dev']
+            if dev not in self._drive_tiles:
+                self._ensure_drive_tile(dev, d['model'], d['size'])
+                relayout = True
+            tile = self._drive_tiles[dev]
+            if dev in cur_disk and dev in self._prev_drive_stats:
+                pr, pw = self._prev_drive_stats[dev]
+                cr, cw = cur_disk[dev]
+                r = int(max(0, cr - pr) * 512 / elapsed)
+                w = int(max(0, cw - pw) * 512 / elapsed)
+                tile['primary'].setText(
+                    f'R {fmt_rate(r)} · W {fmt_rate(w)}')
+                combined = r + w
+                tile['peak'] = max(tile['peak'], combined)
+                tile['spark'].add(combined)
+            if dev in cur_disk:
+                self._prev_drive_stats[dev] = cur_disk[dev]
+            used, total = drive_usage(dev)
+            tmp = drive_temp(dev)
+            cap_str = ('— / —' if total == 0
+                       else f'{fmt_bytes(used)} / {fmt_bytes(total)}')
+            tmp_str = '' if tmp is None else f' · {tmp}°C'
+            tile['cap_label'].setText(cap_str + tmp_str)
+            if total > 0:
+                tile['cap_bar'].setValue(round(used / total * 100))
+        if relayout:
+            self._relayout_drive_tiles()
+        if drives:
+            total_size = sum(d['size'] for d in drives)
+            n = len(drives)
+            self._set_subheader_detail(
+                self._storage_header,
+                f'{n} drive{"s" if n != 1 else ""} · {fmt_bytes(total_size)}')
+        else:
+            self._set_subheader_detail(self._storage_header, 'none')
+
+        # ── Network (per-NIC) ───────────────────────────────────────
+        nics = list_active_nics()
+        current_ifaces = {n['iface'] for n in nics}
+        for iface in list(self._nic_tiles.keys()):
+            if iface not in current_ifaces:
+                self._nic_tiles[iface]['frame'].setParent(None)
+                del self._nic_tiles[iface]
+                self._prev_nic_stats.pop(iface, None)
+        cur_net = read_net_stats()
+        relayout = False
+        for n in nics:
+            iface = n['iface']
+            existed = iface in self._nic_tiles
+            self._ensure_nic_tile(iface, n['kind'], n['ssid'], n['ip'])
+            if not existed:
+                relayout = True
+            tile = self._nic_tiles[iface]
+            if iface in cur_net and iface in self._prev_nic_stats:
+                prx, ptx = self._prev_nic_stats[iface]
+                crx, ctx = cur_net[iface]
+                rx = int(max(0, crx - prx) / elapsed)
+                tx = int(max(0, ctx - ptx) / elapsed)
+                tile['primary'].setText(
+                    f'↓ {fmt_rate(rx)} · ↑ {fmt_rate(tx)}')
+                tile['spark'].add(rx + tx)
+            if iface in cur_net:
+                self._prev_nic_stats[iface] = cur_net[iface]
+        if relayout:
+            self._relayout_nic_tiles()
+        if nics:
+            self._set_subheader_detail(
+                self._network_header, f'{len(nics)} active')
+        else:
+            self._set_subheader_detail(self._network_header, 'offline')
+
+    def _read_meminfo(self):
+        info = {}
         try:
             with open('/proc/meminfo') as f:
-                info = {}
                 for line in f:
                     p = line.split()
-                    if p[0].rstrip(':') in ('MemTotal', 'MemAvailable'):
-                        info[p[0].rstrip(':')] = int(p[1])
-            total = info.get('MemTotal', 1)
-            avail = info.get('MemAvailable', 0)
-            used_pct = round((1 - avail / total) * 100)
-            self.ram_bar.setValue(used_pct)
-            self.ram_val.setText(
-                f'{(total - avail) / 1048576:.1f} / {total / 1048576:.0f} GB')
+                    if not p:
+                        continue
+                    key = p[0].rstrip(':')
+                    if key in ('MemTotal', 'MemAvailable', 'Cached',
+                               'Buffers', 'SwapTotal', 'SwapFree'):
+                        info[key] = int(p[1])
         except Exception:
             pass
-
-        cur_disk = read_disk_stats()
-        tr, tw = 0, 0
-        for name in cur_disk:
-            if name in self._prev_disk:
-                tr += (cur_disk[name][0] - self._prev_disk[name][0]) * 512
-                tw += (cur_disk[name][1] - self._prev_disk[name][1]) * 512
-        self._prev_disk = cur_disk
-        self.disk_r_val.setText(fmt_rate(int(tr / elapsed)))
-        self.disk_w_val.setText(fmt_rate(int(tw / elapsed)))
-
-        cur_net = read_net_stats()
-        rx, tx = 0, 0
-        for iface in cur_net:
-            if iface in self._prev_net:
-                rx += cur_net[iface][0] - self._prev_net[iface][0]
-                tx += cur_net[iface][1] - self._prev_net[iface][1]
-        self._prev_net = cur_net
-        self.net_rx_val.setText(fmt_rate(int(rx / elapsed)))
-        self.net_tx_val.setText(fmt_rate(int(tx / elapsed)))
+        return info
 
     def refresh_profile(self):
         p = read_sys('/sys/firmware/acpi/platform_profile')
@@ -1902,17 +2805,24 @@ class LOQControl(QWidget):
         self.gc_slider.setEnabled(True)
         self.mc_slider.setEnabled(True)
         self.gpu_power_default = int(info['default'])
-        self.pl_slider.setRange(int(info['min']), int(info['max']))
-        ci = int(cur)
+        self.pl_slider.setRange(round(info['min']), round(info['max']))
+        ci = round(cur)
         if not self._pl_user_set:
             self.pl_slider.blockSignals(True)
             self.pl_slider.setValue(ci)
             self.pl_slider.blockSignals(False)
-            self.pl_val.setText(f'{ci}W')
+            self.pl_val.setText(f'{ci} W')
         self._pl_user_set = False
+        # Keep the AUTO chip's reset target in sync with the live default.
+        # Compare against the slider's actual current value — NOT the
+        # nvidia-smi readback, which can lag right after we apply a new
+        # power limit and would otherwise spuriously light up the chip.
+        if getattr(self, 'pl_auto_btn', None) is not None:
+            self.pl_auto_btn._auto_value = round(info['default'])
+            self.pl_auto_btn._update_active(self.pl_slider.value())
         self.oc_status.setText(
-            f'Power {ci}W / {int(info["max"])}W max '
-            f'(default {int(info["default"])}W)')
+            f'// {ci}W of {int(info["max"])}W max '
+            f'· default {int(info["default"])}W')
 
     def refresh_kbd(self):
         b = int(read_sys(
@@ -1936,56 +2846,114 @@ class LOQControl(QWidget):
 
     def refresh_battery(self):
         bp = self.bat_path
+        charge_t = self._batt_tiles['charge']
+        power_t = self._batt_tiles['power']
+        health_t = self._batt_tiles['health']
+        cycles_t = self._batt_tiles['cycles']
+
         if not bp:
-            for w in [self.charge_val, self.health_val, self.cycles_val,
-                      self.batt_rate_val, self.batt_time_val]:
-                w.setText('--')
-            self.batt_status_lbl.setText('--')
+            for t in (charge_t, power_t, health_t, cycles_t):
+                t['primary'].setText('--')
+                t['secondary'].setText('—')
+            if charge_t['bar']: charge_t['bar'].setValue(0)
+            if health_t['bar']: health_t['bar'].setValue(0)
+            self.batt_status_lbl.setText('—')
+            self.batt_status_lbl.setStyleSheet(
+                f'color: {T["TEXT_MUTED"]}; border: none; '
+                f'background: transparent; letter-spacing: 1.5px; '
+                f'padding: 2px 8px; border-radius: 4px;')
             self._style_switch(self.cons_btn, False)
             return
-        pct = read_sys(f'{bp}/capacity')
-        if pct:
-            self.charge_bar.setValue(min(int(pct), 100))
-            self.charge_val.setText(f'{pct}%')
-        else:
-            self.charge_val.setText('--')
+
+        # ── Status badge ────────────────────────────────────────────
+        status = read_sys(f'{bp}/status') or ''
+        names = {'Charging': 'CHARGING', 'Discharging': 'ON BATTERY',
+                 'Full': 'FULL', 'Not charging': 'IDLE'}
+        status_color = {
+            'Charging': '#9affc4', 'Discharging': '#ffb066',
+            'Full': '#4cc4ff', 'Not charging': '#c096ff',
+        }.get(status, T['TEXT_MUTED'])
+        self.batt_status_lbl.setText(names.get(status, status.upper() or '—'))
+        self.batt_status_lbl.setStyleSheet(
+            f'color: {status_color}; border: 1px solid {status_color}; '
+            f'background: transparent; letter-spacing: 1.5px; '
+            f'padding: 2px 8px; border-radius: 4px;')
+
+        # ── Charge ──────────────────────────────────────────────────
+        try:
+            pct = int(read_sys(f'{bp}/capacity') or '0')
+        except ValueError:
+            pct = 0
+        if charge_t['bar'] is not None:
+            charge_t['bar'].setValue(min(pct, 100))
+        charge_t['spark'].add(pct)
+
+        # ── Power draw + time-to-empty/full ─────────────────────────
+        pw = read_sys(f'{bp}/power_now')
+        try:
+            watts = int(pw) / 1e6 if pw else 0
+        except ValueError:
+            watts = 0
+        en = read_sys(f'{bp}/energy_now')
+        eta = ''
+        if status == 'Discharging' and en and watts > 0:
+            try:
+                hrs = int(en) / 1e6 / watts
+                eta = f'ETA {int(hrs)}h {int((hrs % 1) * 60):02d}m'
+            except (ValueError, ZeroDivisionError):
+                pass
+        elif status == 'Charging' and en and watts > 0:
+            ef = read_sys(f'{bp}/energy_full')
+            try:
+                rem = (int(ef) - int(en)) / 1e6
+                hrs = rem / watts
+                eta = f'{int(hrs)}h {int((hrs % 1) * 60):02d}m to full'
+            except (ValueError, TypeError, ZeroDivisionError):
+                pass
+        elif status == 'Full':
+            eta = 'plugged in'
+        charge_t['primary'].setText(f'{pct}%')
+        charge_t['secondary'].setText(eta or '—')
+
+        power_t['spark'].add(watts)
+        power_t['peak'] = max(power_t['peak'], watts)
+        power_t['primary'].setText(
+            f'{watts:.1f} W' if watts > 0 else '—')
+        power_t['secondary'].setText(
+            f'peak {power_t["peak"]:.1f} W' if power_t['peak'] > 0 else '—')
+
+        # ── Health ──────────────────────────────────────────────────
         try:
             full = int(read_sys(f'{bp}/energy_full') or
                        read_sys(f'{bp}/charge_full') or '0')
             design = int(read_sys(f'{bp}/energy_full_design') or
                          read_sys(f'{bp}/charge_full_design') or '1')
-            h = round(full / design * 100)
-            self.health_bar.setValue(min(h, 110))
-            self.health_val.setText(f'{h}%')
+            h_pct = round(full / design * 100)
+            if health_t['bar'] is not None:
+                health_t['bar'].setValue(min(h_pct, 100))
+            health_t['primary'].setText(f'{h_pct}%')
+            wh_now = full / 1e6
+            wh_design = design / 1e6
+            health_t['secondary'].setText(
+                f'{wh_now:.1f} / {wh_design:.1f} Wh')
         except (ValueError, ZeroDivisionError):
-            self.health_val.setText('--')
-        cyc = read_sys(f'{bp}/cycle_count')
-        self.cycles_val.setText(cyc if cyc and cyc != '0' else '--')
+            health_t['primary'].setText('—')
+            health_t['secondary'].setText('—')
 
-        pw = read_sys(f'{bp}/power_now')
-        status = read_sys(f'{bp}/status')
-        watts = int(pw) / 1e6 if pw else 0
-        self.batt_rate_val.setText(f'{watts:.1f}W' if watts > 0 else '--')
-
-        en = read_sys(f'{bp}/energy_now')
-        if status == 'Discharging' and en and watts > 0:
-            hrs = int(en) / 1e6 / watts
-            self.batt_time_val.setText(f'{int(hrs)}h {int((hrs % 1) * 60)}m')
-        elif status == 'Charging' and en and watts > 0:
-            ef = read_sys(f'{bp}/energy_full')
-            if ef:
-                rem = (int(ef) - int(en)) / 1e6
-                hrs = rem / watts
-                self.batt_time_val.setText(
-                    f'{int(hrs)}h {int((hrs % 1) * 60)}m to full')
-            else:
-                self.batt_time_val.setText('--')
+        # ── Cycles ──────────────────────────────────────────────────
+        cyc_raw = read_sys(f'{bp}/cycle_count')
+        try:
+            cyc = int(cyc_raw or '0')
+        except ValueError:
+            cyc = 0
+        cycles_t['primary'].setText(f'{cyc}' if cyc > 0 else '—')
+        hist = battery_history_summary()
+        if hist:
+            cycles_t['secondary'].setText(f'since {hist["since"]}')
         else:
-            self.batt_time_val.setText('--')
+            cycles_t['secondary'].setText('—')
 
-        names = {'Charging': 'Charging', 'Discharging': 'On Battery',
-                 'Full': 'Full', 'Not charging': 'Idle'}
-        self.batt_status_lbl.setText(names.get(status, status or '--'))
+        # ── Conservation toggle ─────────────────────────────────────
         cons = read_sys(f'{IDEAPAD}/conservation_mode') == '1'
         self._style_switch(self.cons_btn, cons)
 
@@ -2025,13 +2993,30 @@ class LOQControl(QWidget):
         self._pl_user_set = True
         self.refresh_overclock()
 
+    def _gpu_pl_auto(self):
+        target = self.gpu_power_default
+        run_cmd(f'nvidia-smi -pl {target}')
+        # Sync slider + chip directly to the target so we don't race
+        # nvidia-smi's apply latency (refresh_overclock would otherwise
+        # read a stale PL and briefly desync the UI).
+        self.pl_slider.blockSignals(True)
+        self.pl_slider.setValue(target)
+        self.pl_slider.blockSignals(False)
+        self.pl_val.setText(f'{target} W')
+        if getattr(self, 'pl_auto_btn', None) is not None:
+            self.pl_auto_btn._update_active(target)
+        self._pl_user_set = True
+        self._save_oc_if_auto()
+
     def _on_gc_change(self, v):
-        self.gc_val.setText('Auto' if v < 180 else f'{v} MHz')
+        self.gc_val.setText('Auto' if v < GPU_CLOCK_MIN else f'{v} MHz')
+
+    # mc label uses the same path as on-init formatter (MEM_LABELS).
 
     def _apply_gpu_clock(self):
         v = self.gc_slider.value()
-        run_cmd('nvidia-smi -rgc' if v < 180
-                else f'nvidia-smi -lgc {v},3090')
+        run_cmd('nvidia-smi -rgc' if v < GPU_CLOCK_MIN
+                else f'nvidia-smi -lgc {v},{GPU_CLOCK_MAX}')
         self._save_oc_if_auto()
 
     def _on_mc_change(self, idx):
@@ -2076,14 +3061,20 @@ class LOQControl(QWidget):
         mc_idx = self.cfg.get('oc_mem_clock_idx', 0)
         if pl > 0:
             run_cmd(f'nvidia-smi -pl {pl}')
-        if gc >= 180:
-            run_cmd(f'nvidia-smi -lgc {gc},3090')
+        if gc >= GPU_CLOCK_MIN:
+            run_cmd(f'nvidia-smi -lgc {gc},{GPU_CLOCK_MAX}')
         if mc_idx > 0:
             freq = MEM_LEVELS[mc_idx]
             run_cmd(f'nvidia-smi -lmc {freq},{freq}')
 
     def _apply_tdp(self):
         v = self.tdp_slider.value()
+        run_cmd(
+            f'echo {v * 1000000} > '
+            f'{RAPL}/constraint_0_power_limit_uw')
+
+    def _cpu_tdp_auto(self):
+        v = self.rapl[0] if self.rapl else self.tdp_slider.value()
         run_cmd(
             f'echo {v * 1000000} > '
             f'{RAPL}/constraint_0_power_limit_uw')
@@ -2148,17 +3139,6 @@ class LOQControl(QWidget):
         QMessageBox.information(
             self, 'Theme',
             f'Theme set to {new}. Restart the app to apply.')
-
-    def export_specs(self):
-        lines = ['LOQ Control — System Specifications', '=' * 40]
-        for label, value in self._spec_lines:
-            lines.append(f'{label}: {value}')
-        lines.append('')
-        lines.append(f'NVIDIA Driver: {self.nv_ver.text()}')
-        lines.append(f'Kernel: {self.kern_ver.text()}')
-        lines.append(f'BIOS: {self.bios_ver.text()}')
-        QApplication.clipboard().setText('\n'.join(lines))
-        self.update_status.setText('Specs copied to clipboard')
 
     def check_updates(self):
         self.update_status.setText('Checking...')
@@ -2235,12 +3215,8 @@ class LOQControl(QWidget):
             QShortcut(QKeySequence(f'Ctrl+{i+1}'), self).activated.connect(
                 lambda m=key: self.set_profile(m))
         QShortcut(QKeySequence('Ctrl+Q'), self).activated.connect(self._quit)
-        QShortcut(QKeySequence('Ctrl+E'), self).activated.connect(
-            self.export_specs)
         QShortcut(QKeySequence('Ctrl+P'), self).activated.connect(
             self._open_proc_manager)
-        QShortcut(QKeySequence('Ctrl+I'), self).activated.connect(
-            self._open_fastfetch)
 
 
 # ── Entry Point ───────────────────────────────────────────────────────
