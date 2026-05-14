@@ -86,18 +86,26 @@ class NoScrollSlider(QSlider):
             return max(lo, min(hi, grid))
         return None
 
-    def sliderChange(self, change):
-        if change == QSlider.SliderValueChange and not self._snapping:
-            v = self.value()
-            snapped = self._snap_value(v)
-            if snapped is not None and snapped != v:
-                self._snapping = True
-                try:
-                    self.setValue(snapped)
-                finally:
-                    self._snapping = False
-                return
-        super().sliderChange(change)
+    # Snap at setValue / setSliderPosition rather than via sliderChange.
+    # Qt's setValue emits valueChanged with the ORIGINAL parameter after
+    # sliderChange returns, so snapping inside sliderChange caused the
+    # label listener to see the post-snap value first and then the raw
+    # pre-snap value — which is why dragging showed non-multiple-of-5
+    # numbers while the handle visually snapped. Intercepting here makes
+    # the snap happen before Qt records the value, so every signal Qt
+    # emits already carries the snapped number.
+
+    def setValue(self, value):
+        snapped = self._snap_value(value)
+        if snapped is not None:
+            value = snapped
+        super().setValue(value)
+
+    def setSliderPosition(self, value):
+        snapped = self._snap_value(value)
+        if snapped is not None:
+            value = snapped
+        super().setSliderPosition(value)
 
 
 # ── Config ────────────────────────────────────────────────────────────
@@ -365,6 +373,38 @@ def find_battery():
         if read_sys(f'{p}/type') == 'Battery':
             return p
     return None
+
+
+def read_cpu_package_energy_uj():
+    """Cumulative CPU package energy counter in microjoules (RAPL).
+
+    Take deltas between samples to derive average power over the
+    interval. Returns None if unavailable.
+    """
+    raw = read_sys(f'{RAPL}/energy_uj')
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def read_cpu_max_energy_uj():
+    raw = read_sys(f'{RAPL}/max_energy_range_uj')
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def read_gpu_power_draw():
+    """Instantaneous GPU power draw in W via nvidia-smi power.draw."""
+    out = run_output([
+        'nvidia-smi', '--query-gpu=power.draw',
+        '--format=csv,noheader,nounits'])
+    try:
+        return float((out or '').strip())
+    except (ValueError, AttributeError):
+        return None
 
 
 def cpu_model_short():
@@ -1486,6 +1526,11 @@ class LOQControl(QWidget):
         self._prev_net = read_net_stats()
         self._prev_disk = read_disk_stats()
         self._prev_time = time.monotonic()
+        # CPU package energy tracking for system power (W) calc
+        self._cpu_energy_prev = (read_cpu_package_energy_uj(),
+                                 time.monotonic())
+        # Last sample-tick timestamps for long-span battery sparklines
+        self._battery_spark_last = 0.0
         self.rapl = get_rapl_info()
         self._update_done.connect(self._on_update_done)
         self._proc_manager = None
@@ -1891,26 +1936,31 @@ class LOQControl(QWidget):
             'CHARGE', '#9affc4', show_bar=True, bar_max=100,
             primary='--%', secondary='--',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
-        self._batt_tiles['power'] = self._make_metric_tile(
-            'POWER DRAW', '#ffb066',
+        # Battery's own power_now reading — what the battery is sourcing
+        # or sinking. Will be tiny on AC (just trickle maintenance),
+        # meaningful when discharging.
+        self._batt_tiles['batt_draw'] = self._make_metric_tile(
+            'BATTERY DRAW', '#ffb066',
             primary='-- W', secondary='peak --',
+            fmt=lambda v: f'{v:.2f} W')
+        # CPU package (RAPL) + GPU (nvidia-smi power.draw) — the bulk
+        # of what's actually being consumed by the system, regardless
+        # of whether AC is plugged in.
+        self._batt_tiles['system_power'] = self._make_metric_tile(
+            'SYSTEM POWER', '#ff7a7a',
+            primary='-- W', secondary='CPU -- · GPU --',
             fmt=lambda v: f'{v:.1f} W')
         self._batt_tiles['health'] = self._make_metric_tile(
             'HEALTH', '#4cc4ff', show_bar=True, bar_max=100,
             primary='--%', secondary='--',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
-        # Tweak: HEALTH spark logs to per-day; usually flat in-session,
-        # so present it without active sparkline by hiding it.
+        # Health changes day-to-day, not in-session — hide its sparkline
+        # since it would be a flat line for hours.
         self._batt_tiles['health']['spark'].setVisible(False)
-        self._batt_tiles['cycles'] = self._make_metric_tile(
-            'CYCLES', '#c096ff',
-            primary='--', secondary='—',
-            fmt=lambda v: f'{int(v)}')
-        self._batt_tiles['cycles']['spark'].setVisible(False)
         grid.addWidget(self._batt_tiles['charge']['frame'], 0, 0)
-        grid.addWidget(self._batt_tiles['power']['frame'], 0, 1)
-        grid.addWidget(self._batt_tiles['health']['frame'], 1, 0)
-        grid.addWidget(self._batt_tiles['cycles']['frame'], 1, 1)
+        grid.addWidget(self._batt_tiles['batt_draw']['frame'], 0, 1)
+        grid.addWidget(self._batt_tiles['system_power']['frame'], 1, 0)
+        grid.addWidget(self._batt_tiles['health']['frame'], 1, 1)
         vbox.addLayout(grid)
 
         # History caption
@@ -2847,12 +2897,43 @@ class LOQControl(QWidget):
     def refresh_battery(self):
         bp = self.bat_path
         charge_t = self._batt_tiles['charge']
-        power_t = self._batt_tiles['power']
+        bdraw_t = self._batt_tiles['batt_draw']
+        syspow_t = self._batt_tiles['system_power']
         health_t = self._batt_tiles['health']
-        cycles_t = self._batt_tiles['cycles']
+
+        # Long-span sparklines: only feed every BATTERY_SPARK_INTERVAL
+        # seconds so 60 samples span hours rather than minutes.
+        BATTERY_SPARK_INTERVAL = 180  # 3 min/sample → 3 hours of history
+        now_mono = time.monotonic()
+        do_sample = (now_mono - self._battery_spark_last
+                     >= BATTERY_SPARK_INTERVAL)
+
+        # ── System power (CPU + GPU) — works AC or battery ─────────
+        cpu_w = 0.0
+        e_now = read_cpu_package_energy_uj()
+        e_prev, t_prev = self._cpu_energy_prev
+        if e_now is not None and e_prev is not None:
+            dt = now_mono - t_prev
+            if dt > 0.1:
+                delta_uj = e_now - e_prev
+                if delta_uj < 0:  # wrap-around
+                    mx = read_cpu_max_energy_uj()
+                    if mx:
+                        delta_uj += mx
+                if delta_uj >= 0:
+                    cpu_w = (delta_uj / 1e6) / dt
+        self._cpu_energy_prev = (e_now, now_mono)
+        gpu_w = read_gpu_power_draw() or 0.0
+        sys_w = cpu_w + gpu_w
+        syspow_t['primary'].setText(f'{sys_w:.1f} W')
+        syspow_t['secondary'].setText(
+            f'CPU {cpu_w:.1f} · GPU {gpu_w:.1f}')
+        syspow_t['peak'] = max(syspow_t['peak'], sys_w)
+        if do_sample:
+            syspow_t['spark'].add(sys_w)
 
         if not bp:
-            for t in (charge_t, power_t, health_t, cycles_t):
+            for t in (charge_t, bdraw_t, health_t):
                 t['primary'].setText('--')
                 t['secondary'].setText('—')
             if charge_t['bar']: charge_t['bar'].setValue(0)
@@ -2863,6 +2944,8 @@ class LOQControl(QWidget):
                 f'background: transparent; letter-spacing: 1.5px; '
                 f'padding: 2px 8px; border-radius: 4px;')
             self._style_switch(self.cons_btn, False)
+            if do_sample:
+                self._battery_spark_last = now_mono
             return
 
         # ── Status badge ────────────────────────────────────────────
@@ -2886,27 +2969,28 @@ class LOQControl(QWidget):
             pct = 0
         if charge_t['bar'] is not None:
             charge_t['bar'].setValue(min(pct, 100))
-        charge_t['spark'].add(pct)
+        if do_sample:
+            charge_t['spark'].add(pct)
 
-        # ── Power draw + time-to-empty/full ─────────────────────────
+        # ── Battery draw + time-to-empty/full ──────────────────────
         pw = read_sys(f'{bp}/power_now')
         try:
-            watts = int(pw) / 1e6 if pw else 0
+            batt_w = int(pw) / 1e6 if pw else 0
         except ValueError:
-            watts = 0
+            batt_w = 0
         en = read_sys(f'{bp}/energy_now')
         eta = ''
-        if status == 'Discharging' and en and watts > 0:
+        if status == 'Discharging' and en and batt_w > 0:
             try:
-                hrs = int(en) / 1e6 / watts
+                hrs = int(en) / 1e6 / batt_w
                 eta = f'ETA {int(hrs)}h {int((hrs % 1) * 60):02d}m'
             except (ValueError, ZeroDivisionError):
                 pass
-        elif status == 'Charging' and en and watts > 0:
+        elif status == 'Charging' and en and batt_w > 0:
             ef = read_sys(f'{bp}/energy_full')
             try:
                 rem = (int(ef) - int(en)) / 1e6
-                hrs = rem / watts
+                hrs = rem / batt_w
                 eta = f'{int(hrs)}h {int((hrs % 1) * 60):02d}m to full'
             except (ValueError, TypeError, ZeroDivisionError):
                 pass
@@ -2915,14 +2999,15 @@ class LOQControl(QWidget):
         charge_t['primary'].setText(f'{pct}%')
         charge_t['secondary'].setText(eta or '—')
 
-        power_t['spark'].add(watts)
-        power_t['peak'] = max(power_t['peak'], watts)
-        power_t['primary'].setText(
-            f'{watts:.1f} W' if watts > 0 else '—')
-        power_t['secondary'].setText(
-            f'peak {power_t["peak"]:.1f} W' if power_t['peak'] > 0 else '—')
+        bdraw_t['peak'] = max(bdraw_t['peak'], batt_w)
+        bdraw_t['primary'].setText(
+            f'{batt_w:.2f} W' if batt_w > 0 else '—')
+        bdraw_t['secondary'].setText(
+            f'peak {bdraw_t["peak"]:.2f} W' if bdraw_t['peak'] > 0 else '—')
+        if do_sample:
+            bdraw_t['spark'].add(batt_w)
 
-        # ── Health ──────────────────────────────────────────────────
+        # ── Health (+ cycles in secondary) ─────────────────────────
         try:
             full = int(read_sys(f'{bp}/energy_full') or
                        read_sys(f'{bp}/charge_full') or '0')
@@ -2934,24 +3019,21 @@ class LOQControl(QWidget):
             health_t['primary'].setText(f'{h_pct}%')
             wh_now = full / 1e6
             wh_design = design / 1e6
-            health_t['secondary'].setText(
-                f'{wh_now:.1f} / {wh_design:.1f} Wh')
+            cyc_raw = read_sys(f'{bp}/cycle_count')
+            try:
+                cyc = int(cyc_raw or '0')
+            except ValueError:
+                cyc = 0
+            secondary_bits = [f'{wh_now:.1f} / {wh_design:.1f} Wh']
+            if cyc > 0:
+                secondary_bits.append(f'{cyc} cycles')
+            health_t['secondary'].setText(' · '.join(secondary_bits))
         except (ValueError, ZeroDivisionError):
             health_t['primary'].setText('—')
             health_t['secondary'].setText('—')
 
-        # ── Cycles ──────────────────────────────────────────────────
-        cyc_raw = read_sys(f'{bp}/cycle_count')
-        try:
-            cyc = int(cyc_raw or '0')
-        except ValueError:
-            cyc = 0
-        cycles_t['primary'].setText(f'{cyc}' if cyc > 0 else '—')
-        hist = battery_history_summary()
-        if hist:
-            cycles_t['secondary'].setText(f'since {hist["since"]}')
-        else:
-            cycles_t['secondary'].setText('—')
+        if do_sample:
+            self._battery_spark_last = now_mono
 
         # ── Conservation toggle ─────────────────────────────────────
         cons = read_sys(f'{IDEAPAD}/conservation_mode') == '1'
