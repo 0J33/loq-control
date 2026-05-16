@@ -2105,7 +2105,7 @@ class LOQControl(QWidget):
             ticks=[(0, 'Auto'),
                    (1000, '1000'), (1500, '1500'),
                    (2000, '2000'), (2500, '2500'), (3090, '3090')],
-            hint='5 MHz steps \u00b7 lock above 2000 MHz to stop downclocks',
+            hint='5 MHz steps \u00b7 lock 2000\u20132500 to stop idle downclocks',
             auto_value=0, on_auto=self._apply_gpu_clock)
         self.gc_slider.valueChanged.connect(self._on_gc_change)
         self.gc_slider.sliderReleased.connect(self._apply_gpu_clock)
