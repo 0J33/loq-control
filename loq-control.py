@@ -300,6 +300,17 @@ def run_cmd(cmd):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def set_gpu_tgp(watts):
+    # nvidia-smi -pl is locked on mobile Blackwell; route through Lenovo
+    # WMAE method which writes EC GTGP and notifies NVIDIA NPCF.
+    w = max(45, min(100, int(watts)))
+    run_cmd(
+        "modprobe acpi_call 2>/dev/null; "
+        "echo '\\_SB.GZFD.WMAE 0 0x12 "
+        f"{{0x00, 0x00, 0x02, 0x02, 0x{w:02X}, 0x00, 0x00, 0x00}}' "
+        "> /proc/acpi/call")
+
+
 def run_output(cmd):
     try:
         return subprocess.run(
@@ -2081,12 +2092,12 @@ class LOQControl(QWidget):
         # \u2500\u2500 Power Limit \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         pl_panel, self.pl_slider, self.pl_val, self.pl_auto_btn = (
             self._oc_panel(
-                'POWER LIMIT', 5, 100, 45,
+                'POWER LIMIT', 45, 100, 45,
                 value_fmt=lambda v: f'{int(v)} W',
-                snap=5, tick_interval=5, major_tick_every=25,
-                ticks=[(5, '5'), (25, '25'), (50, '50'),
-                       (75, '75'), (100, '100')],
-                hint='5 W steps \u00b7 80 W sweet spot \u00b7 '
+                snap=5, tick_interval=5, major_tick_every=15,
+                ticks=[(45, '45'), (60, '60'), (75, '75'),
+                       (90, '90'), (100, '100')],
+                hint='5 W steps \u00b7 45 W base \u00b7 100 W vBIOS max \u00b7 '
                      'AUTO = factory default',
                 auto_value=45,  # placeholder \u2014 updated by refresh_overclock
                 on_auto=self._gpu_pl_auto))
@@ -3070,14 +3081,14 @@ class LOQControl(QWidget):
                 f'Set to {names[mode]}.\nPlease reboot.')
 
     def _apply_power_limit(self):
-        run_cmd(f'nvidia-smi -pl {self.pl_slider.value()}')
+        set_gpu_tgp(self.pl_slider.value())
         self._save_oc_if_auto()
         self._pl_user_set = True
         self.refresh_overclock()
 
     def _gpu_pl_auto(self):
         target = self.gpu_power_default
-        run_cmd(f'nvidia-smi -pl {target}')
+        set_gpu_tgp(target)
         # Sync slider + chip directly to the target so we don't race
         # nvidia-smi's apply latency (refresh_overclock would otherwise
         # read a stale PL and briefly desync the UI).
@@ -3111,7 +3122,7 @@ class LOQControl(QWidget):
         self._save_oc_if_auto()
 
     def _reset_overclock(self):
-        run_cmd(f'nvidia-smi -pl {self.gpu_power_default}')
+        set_gpu_tgp(self.gpu_power_default)
         run_cmd('nvidia-smi -rgc')
         run_cmd('nvidia-smi -rmc')
         for s, v, txt in [(self.mc_slider, self.mc_val, 'Auto'),
@@ -3142,7 +3153,7 @@ class LOQControl(QWidget):
         gc = self.cfg.get('oc_gpu_clock', 0)
         mc_idx = self.cfg.get('oc_mem_clock_idx', 0)
         if pl > 0:
-            run_cmd(f'nvidia-smi -pl {pl}')
+            set_gpu_tgp(pl)
         if gc >= GPU_CLOCK_MIN:
             run_cmd(f'nvidia-smi -lgc {gc},{GPU_CLOCK_MAX}')
         if mc_idx > 0:
