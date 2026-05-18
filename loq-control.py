@@ -1698,6 +1698,7 @@ class LOQControl(QWidget):
         self.refresh_all()
         self.sensor_timer = QTimer()
         self.sensor_timer.timeout.connect(self.refresh_sensors)
+        self.sensor_timer.timeout.connect(self.refresh_battery)
         self.sensor_timer.start(3000)
 
     # ── widget helpers ────────────────────────────────────────────────
@@ -1911,9 +1912,10 @@ class LOQControl(QWidget):
         self._sensor_tiles['cpu_util'] = self._make_metric_tile(
             'CPU UTIL', '#4cc4ff', primary='--%', secondary='peak --',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
-        self._sensor_tiles['cpu_pwr'] = self._make_metric_tile(
-            'CPU POWER', '#ffa94d', primary='-- W', secondary='peak --',
-            fmt=lambda v: f'{v:.1f} W')
+        self._sensor_tiles['uptime'] = self._make_metric_tile(
+            'UPTIME', '#d9c1ff', primary='--', secondary='since boot')
+        # Uptime is monotonic — sparkline would be a flat slope, hide it
+        self._sensor_tiles['uptime']['spark'].setVisible(False)
         self._sensor_tiles['cpu_clk'] = self._make_metric_tile(
             'CPU CLOCK', '#6c8aff', primary='-- MHz', secondary='',
             fmt=lambda v: f'{int(v)} MHz')
@@ -1946,7 +1948,7 @@ class LOQControl(QWidget):
         # Row 4: FAN     / FAN
         grid.addWidget(self._sensor_tiles['cpu_util']['frame'], 0, 0)
         grid.addWidget(self._sensor_tiles['gpu_util']['frame'], 0, 1)
-        grid.addWidget(self._sensor_tiles['cpu_pwr']['frame'], 1, 0)
+        grid.addWidget(self._sensor_tiles['uptime']['frame'], 1, 0)
         grid.addWidget(self._sensor_tiles['gpu_mem']['frame'], 1, 1)
         grid.addWidget(self._sensor_tiles['cpu_clk']['frame'], 2, 0)
         grid.addWidget(self._sensor_tiles['gpu_clk']['frame'], 2, 1)
@@ -2749,13 +2751,27 @@ class LOQControl(QWidget):
                     cpu_w = (delta_uj / 1e6) / dt_e
         self._cpu_energy_prev = (e_now, now_mono)
         self._last_cpu_w = cpu_w
-        pwr_tile = self._sensor_tiles.get('cpu_pwr')
-        if pwr_tile is not None:
-            pwr_tile['primary'].setText(f'{cpu_w:.1f} W')
-            pwr_tile['peak'] = max(pwr_tile['peak'], cpu_w)
-            pwr_tile['secondary'].setText(
-                f'peak {pwr_tile["peak"]:.1f} W')
-            pwr_tile['spark'].add(cpu_w)
+
+        # Uptime
+        up_tile = self._sensor_tiles.get('uptime')
+        if up_tile is not None:
+            try:
+                with open('/proc/uptime') as f:
+                    sec = float(f.read().split()[0])
+                days = int(sec // 86400)
+                hours = int((sec % 86400) // 3600)
+                mins = int((sec % 3600) // 60)
+                if days > 0:
+                    up_tile['primary'].setText(f'{days}d {hours}h {mins}m')
+                elif hours > 0:
+                    up_tile['primary'].setText(f'{hours}h {mins}m')
+                else:
+                    up_tile['primary'].setText(f'{mins}m')
+                boot_t = time.time() - sec
+                up_tile['secondary'].setText(
+                    f'since {time.strftime("%b %d %H:%M", time.localtime(boot_t))}')
+            except Exception:
+                pass
 
         # Fans
         cpu_rpm, gpu_rpm = read_fan_rpm()
@@ -3066,10 +3082,15 @@ class LOQControl(QWidget):
         syspow_t = self._batt_tiles['system_power']
         health_t = self._batt_tiles['health']
 
-        # Feed graphs every tick so all four tiles render a live curve.
-        # (The CSV log still tracks day-over-day health for the caption.)
+        # Labels update every refresh tick (same cadence as the CPU/GPU
+        # tiles); sparkline samples are kept at a long interval so the
+        # 60-point series spans hours rather than minutes. The very first
+        # refresh always samples so each graph starts with a point.
+        BATTERY_SPARK_INTERVAL = 180  # 3 min/sample → ~3 hours of history
         now_mono = time.monotonic()
-        do_sample = True
+        do_sample = (self._battery_spark_last == 0.0
+                     or now_mono - self._battery_spark_last
+                     >= BATTERY_SPARK_INTERVAL)
 
         # ── System power (CPU + GPU) — works AC or battery ─────────
         # CPU watts are computed in refresh_sensors and cached for reuse.
