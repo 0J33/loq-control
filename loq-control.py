@@ -926,14 +926,19 @@ class Sparkline(QWidget):
     """
 
     def __init__(self, max_pts=60, color='#4cc4ff', height=46,
-                 fixed_max=None, fmt=None):
+                 fixed_max=None, fmt=None, color2=None,
+                 label1='', label2=''):
         super().__init__()
         self.max_pts = max_pts
         self.color = color
+        self.color2 = color2          # if set, a second series is drawn
+        self.label1 = label1
+        self.label2 = label2
         self.fixed_max = fixed_max
         # fmt(v) -> str. Defaults to integer percent-like formatting.
         self.fmt = fmt or (lambda v: f'{v:.1f}' if v < 10 else f'{int(v)}')
         self.data = deque(maxlen=max_pts)
+        self.data2 = deque(maxlen=max_pts)
         self._hover_x = None
         self.setFixedHeight(height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -944,8 +949,14 @@ class Sparkline(QWidget):
         self.data.append(max(0.0, float(v)))
         self.update()
 
+    def add_pair(self, v1, v2):
+        self.data.append(max(0.0, float(v1)))
+        self.data2.append(max(0.0, float(v2)))
+        self.update()
+
     def reset(self):
         self.data.clear()
+        self.data2.clear()
         self.update()
 
     def mouseMoveEvent(self, ev):
@@ -979,55 +990,78 @@ class Sparkline(QWidget):
         n = len(self.data)
         if n < 2:
             return
-        mx = self.fixed_max if self.fixed_max else max(max(self.data), 1.0)
+        has2 = self.color2 is not None and len(self.data2) >= 2
+        peak1 = max(self.data) if self.data else 0
+        peak2 = max(self.data2) if (has2 and self.data2) else 0
+        mx = self.fixed_max if self.fixed_max else max(peak1, peak2, 1.0)
         if mx <= 0:
             mx = 1.0
-        col = QColor(self.color)
-        pts = []
-        for i, v in enumerate(self.data):
-            x = int(i * (w - 1) / (self.max_pts - 1))
-            y = int((h - 2) * (1 - min(v, mx) / mx)) + 1
-            pts.append((x, y))
-        # fill under the line
-        fill = QColor(self.color); fill.setAlpha(60)
-        end = QColor(self.color);  end.setAlpha(0)
-        grad = QLinearGradient(0, 0, 0, h)
-        grad.setColorAt(0.0, fill)
-        grad.setColorAt(1.0, end)
-        path = QPainterPath()
-        path.moveTo(pts[0][0], h)
-        for x, y in pts:
-            path.lineTo(x, y)
-        path.lineTo(pts[-1][0], h)
-        path.closeSubpath()
-        p.fillPath(path, grad)
-        # line
-        p.setPen(QPen(col, 1.6))
-        for i in range(len(pts) - 1):
-            p.drawLine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
+
+        def build_pts(series):
+            pts = []
+            for i, v in enumerate(series):
+                x = int(i * (w - 1) / (self.max_pts - 1))
+                y = int((h - 2) * (1 - min(v, mx) / mx)) + 1
+                pts.append((x, y))
+            return pts
+
+        def draw_series(series, color, alpha_fill=60):
+            if len(series) < 2:
+                return None
+            pts = build_pts(series)
+            fill = QColor(color); fill.setAlpha(alpha_fill)
+            end = QColor(color);  end.setAlpha(0)
+            grad = QLinearGradient(0, 0, 0, h)
+            grad.setColorAt(0.0, fill)
+            grad.setColorAt(1.0, end)
+            path = QPainterPath()
+            path.moveTo(pts[0][0], h)
+            for x, y in pts:
+                path.lineTo(x, y)
+            path.lineTo(pts[-1][0], h)
+            path.closeSubpath()
+            p.fillPath(path, grad)
+            p.setPen(QPen(QColor(color), 1.6))
+            for i in range(len(pts) - 1):
+                p.drawLine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
+            return pts
+
+        # When two series share a chart, dim fills so they don't fight
+        fill_a = 60 if not has2 else 35
+        pts = draw_series(self.data, self.color, alpha_fill=fill_a)
+        pts2 = draw_series(self.data2, self.color2, alpha_fill=fill_a) if has2 else None
 
         # ── hover crosshair + value ─────────────────────────────────
         if self._hover_x is None or not (0 <= self._hover_x < w):
             return
-        # Map x → nearest data index based on actual drawn x positions
-        hx = self._hover_x
-        # search nearest index by x distance
-        best_i, best_dx = 0, abs(pts[0][0] - hx)
+        hx_in = self._hover_x
+        best_i, best_dx = 0, abs(pts[0][0] - hx_in)
         for i, (px, _) in enumerate(pts):
-            dx = abs(px - hx)
+            dx = abs(px - hx_in)
             if dx < best_dx:
                 best_i, best_dx = i, dx
         hx, hy = pts[best_i]
-        # crosshair
         cross = QColor(T['TEXT']); cross.setAlpha(120)
         p.setPen(QPen(cross, 1))
         p.drawLine(hx, 0, hx, h)
-        # dot
-        p.setBrush(col)
+        # dot on series 1
+        p.setBrush(QColor(self.color))
         p.setPen(QPen(QColor(T['BG']), 1.2))
         p.drawEllipse(hx - 3, hy - 3, 6, 6)
-        # value label
-        text = self.fmt(self.data[best_i])
+        # dot on series 2
+        if pts2 and best_i < len(pts2):
+            hx2, hy2 = pts2[best_i]
+            p.setBrush(QColor(self.color2))
+            p.setPen(QPen(QColor(T['BG']), 1.2))
+            p.drawEllipse(hx2 - 3, hy2 - 3, 6, 6)
+        if has2:
+            v1 = self.data[best_i]
+            v2 = self.data2[best_i] if best_i < len(self.data2) else 0
+            t1 = f'{self.label1}{self.fmt(v1)}' if self.label1 else self.fmt(v1)
+            t2 = f'{self.label2}{self.fmt(v2)}' if self.label2 else self.fmt(v2)
+            text = f'{t1} · {t2}'
+        else:
+            text = self.fmt(self.data[best_i])
         p.setFont(QFont(FONT, 8, QFont.Bold))
         fm = p.fontMetrics()
         tw = fm.horizontalAdvance(text) + 8
@@ -1035,7 +1069,7 @@ class Sparkline(QWidget):
         lx = hx + 6
         if lx + tw > w:
             lx = hx - tw - 6
-        ly = max(0, hy - th - 2)
+        ly = max(0, min(hy, hy2 if pts2 else hy) - th - 2)
         bg = QColor(T['CARD']); bg.setAlpha(230)
         p.setPen(QPen(QColor(T['BORDER']), 1))
         p.setBrush(bg)
@@ -1830,23 +1864,28 @@ class LOQControl(QWidget):
 
     def _build_sensors_card(self):
         card, vbox = self._card()
-        hdr = QHBoxLayout()
-        hdr.addWidget(self._header('Sensors'))
-        hdr.addStretch()
-        self.throttle_lbl = QLabel('')
-        self.throttle_lbl.setFont(QFont(FONT, 8, QFont.Bold))
-        self.throttle_lbl.setStyleSheet(
-            'color: #ff4444; border: none; background: transparent;')
-        hdr.addWidget(self.throttle_lbl)
-        vbox.addLayout(hdr)
+        vbox.addWidget(self._header('Sensors'))
 
         self._sensor_tiles = {}
 
-        # ── CPU group ───────────────────────────────────────────────
-        vbox.addLayout(self._device_subheader(
+        # CPU + GPU subheaders side-by-side
+        sub_row = QHBoxLayout(); sub_row.setSpacing(10)
+        cpu_sub_w = QWidget()
+        cpu_sub_w.setLayout(self._device_subheader(
             'CPU', cpu_model_short() + f' · {self.n_cores} threads'))
-        cpu_grid = QGridLayout(); cpu_grid.setSpacing(10)
-        cpu_grid.setColumnStretch(0, 1); cpu_grid.setColumnStretch(1, 1)
+        cpu_sub_w.setStyleSheet('background: transparent;')
+        gpu_sub_w = QWidget()
+        gpu_sub_w.setLayout(self._device_subheader(
+            'GPU', gpu_model_short()))
+        gpu_sub_w.setStyleSheet('background: transparent;')
+        sub_row.addWidget(cpu_sub_w, 1)
+        sub_row.addWidget(gpu_sub_w, 1)
+        vbox.addLayout(sub_row)
+
+        # Single grid: CPU left col, GPU right col, similar graphs paired
+        grid = QGridLayout(); grid.setSpacing(10)
+        grid.setColumnStretch(0, 1); grid.setColumnStretch(1, 1)
+
         self._sensor_tiles['cpu_util'] = self._make_metric_tile(
             'CPU UTIL', '#4cc4ff', primary='--%', secondary='peak --',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
@@ -1859,14 +1898,6 @@ class LOQControl(QWidget):
         self._sensor_tiles['cpu_fan'] = self._make_metric_tile(
             'CPU FAN', '#9affc4', primary='-- RPM', secondary='',
             fmt=lambda v: f'{int(v)} RPM')
-        for i, k in enumerate(['cpu_util', 'cpu_clk', 'cpu_tmp', 'cpu_fan']):
-            cpu_grid.addWidget(self._sensor_tiles[k]['frame'], i // 2, i % 2)
-        vbox.addLayout(cpu_grid)
-
-        # ── GPU group ───────────────────────────────────────────────
-        vbox.addLayout(self._device_subheader('GPU', gpu_model_short()))
-        gpu_grid = QGridLayout(); gpu_grid.setSpacing(10)
-        gpu_grid.setColumnStretch(0, 1); gpu_grid.setColumnStretch(1, 1)
         self._sensor_tiles['gpu_util'] = self._make_metric_tile(
             'GPU UTIL', '#7cffb4', primary='--%', secondary='peak --',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
@@ -1882,12 +1913,22 @@ class LOQControl(QWidget):
         self._sensor_tiles['gpu_fan'] = self._make_metric_tile(
             'GPU FAN', '#ffb066', primary='-- RPM', secondary='',
             fmt=lambda v: f'{int(v)} RPM')
-        for i, k in enumerate(['gpu_util', 'gpu_clk', 'gpu_mem',
-                               'gpu_tmp', 'gpu_fan']):
-            gpu_grid.addWidget(self._sensor_tiles[k]['frame'], i // 2, i % 2)
-        vbox.addLayout(gpu_grid)
 
-        # ── Per-core bar chart ──────────────────────────────────────
+        # Row 0: UTIL / UTIL · Row 1: CLOCK / CLOCK
+        # Row 2: TEMP / TEMP · Row 3: FAN / FAN
+        # Row 4: GPU MEM CLK spans both cols (no CPU counterpart)
+        grid.addWidget(self._sensor_tiles['cpu_util']['frame'], 0, 0)
+        grid.addWidget(self._sensor_tiles['gpu_util']['frame'], 0, 1)
+        grid.addWidget(self._sensor_tiles['cpu_clk']['frame'], 1, 0)
+        grid.addWidget(self._sensor_tiles['gpu_clk']['frame'], 1, 1)
+        grid.addWidget(self._sensor_tiles['cpu_tmp']['frame'], 2, 0)
+        grid.addWidget(self._sensor_tiles['gpu_tmp']['frame'], 2, 1)
+        grid.addWidget(self._sensor_tiles['cpu_fan']['frame'], 3, 0)
+        grid.addWidget(self._sensor_tiles['gpu_fan']['frame'], 3, 1)
+        grid.addWidget(self._sensor_tiles['gpu_mem']['frame'], 4, 0, 1, 2)
+        vbox.addLayout(grid)
+
+        # Per-core bar chart
         cl = QLabel('PER-CORE UTILIZATION')
         cl.setFont(QFont(FONT, 8, QFont.Bold))
         cl.setStyleSheet(
@@ -1965,13 +2006,30 @@ class LOQControl(QWidget):
             'HEALTH', '#4cc4ff', show_bar=True, bar_max=100,
             primary='--%', secondary='--',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
-        # Health changes day-to-day, not in-session — hide its sparkline
-        # since it would be a flat line for hours.
-        self._batt_tiles['health']['spark'].setVisible(False)
+        # Seed health sparkline with historical readings so it has a curve.
+        try:
+            if os.path.exists(HISTORY_FILE):
+                with open(HISTORY_FILE) as f:
+                    pts = []
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = line.split(',')
+                        if len(parts) >= 2:
+                            try:
+                                pts.append(float(parts[1]))
+                            except ValueError:
+                                pass
+                    for v in pts[-60:]:
+                        self._batt_tiles['health']['spark'].add(v)
+        except Exception:
+            pass
+        # CHARGE | HEALTH / BATTERY DRAW | SYSTEM POWER
         grid.addWidget(self._batt_tiles['charge']['frame'], 0, 0)
-        grid.addWidget(self._batt_tiles['batt_draw']['frame'], 0, 1)
-        grid.addWidget(self._batt_tiles['system_power']['frame'], 1, 0)
-        grid.addWidget(self._batt_tiles['health']['frame'], 1, 1)
+        grid.addWidget(self._batt_tiles['health']['frame'], 0, 1)
+        grid.addWidget(self._batt_tiles['batt_draw']['frame'], 1, 0)
+        grid.addWidget(self._batt_tiles['system_power']['frame'], 1, 1)
         vbox.addLayout(grid)
 
         # History caption
@@ -2390,18 +2448,31 @@ class LOQControl(QWidget):
         return card
 
     def _layout_memory_tiles(self):
-        while self._mem_grid.count():
-            it = self._mem_grid.takeAt(0)
+        self._fill_paired_grid(
+            self._mem_grid,
+            [self._activity_tiles[k]['frame']
+             for k in self._activity_order
+             if k in self._activity_tiles])
+
+    def _fill_paired_grid(self, grid, frames):
+        """Pack frames into a 2-col grid; last odd one spans both columns
+        so we never leave a visible empty slot beside it."""
+        while grid.count():
+            it = grid.takeAt(0)
             w = it.widget()
             if w is not None:
-                self._mem_grid.removeWidget(w)
+                grid.removeWidget(w)
+        n = len(frames)
         i = 0
-        for key in self._activity_order:
-            tile = self._activity_tiles.get(key)
-            if tile is None:
-                continue
-            self._mem_grid.addWidget(tile['frame'], i // 2, i % 2)
-            i += 1
+        for idx, frame in enumerate(frames):
+            last = (idx == n - 1)
+            row, col = i // 2, i % 2
+            if last and col == 0:
+                grid.addWidget(frame, row, 0, 1, 2)
+                i += 2
+            else:
+                grid.addWidget(frame, row, col)
+                i += 1
 
     def _ensure_drive_tile(self, dev, model, size):
         if dev in self._drive_tiles:
@@ -2409,10 +2480,11 @@ class LOQControl(QWidget):
         size_str = fmt_bytes(size)
         label = f'/dev/{dev}'.upper()
         tile = self._make_metric_tile(
-            label, '#ffb066',
+            label, '#4cc4ff',  # read = blue
             primary='R -- · W --',
             secondary=(model[:24] + '…') if len(model) > 25 else (model or size_str),
-            fmt=lambda v: fmt_rate(int(v)))
+            fmt=lambda v: fmt_rate(int(v)),
+            color2='#ffb066', label1='R ', label2='W ')  # write = orange
         # Capacity bar shows used %; rates feed sparkline
         tile['cap_bar'] = QProgressBar()
         tile['cap_bar'].setRange(0, 100); tile['cap_bar'].setTextVisible(False)
@@ -2447,7 +2519,8 @@ class LOQControl(QWidget):
         tile = self._make_metric_tile(
             label, color, primary='↓ -- · ↑ --',
             secondary=kind.upper(),
-            fmt=lambda v: fmt_rate(int(v)))
+            fmt=lambda v: fmt_rate(int(v)),
+            color2='#ffb066', label1='↓ ', label2='↑ ')  # up = orange
         info = QLabel(self._nic_info_text(kind, ssid, ip))
         info.setFont(QFont(FONT, 8))
         info.setStyleSheet(
@@ -2469,27 +2542,19 @@ class LOQControl(QWidget):
         return ' · '.join(bits) if bits else 'no address'
 
     def _relayout_drive_tiles(self):
-        while self._storage_grid.count():
-            it = self._storage_grid.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                self._storage_grid.removeWidget(w)
-        for i, dev in enumerate(sorted(self._drive_tiles.keys())):
-            tile = self._drive_tiles[dev]
-            self._storage_grid.addWidget(tile['frame'], i // 2, i % 2)
+        keys = sorted(self._drive_tiles.keys())
+        self._fill_paired_grid(
+            self._storage_grid,
+            [self._drive_tiles[k]['frame'] for k in keys])
 
     def _relayout_nic_tiles(self):
-        while self._network_grid.count():
-            it = self._network_grid.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                self._network_grid.removeWidget(w)
         # ordering: physical first (wifi, eth), then vpn, then other
         order_key = {'wifi': 0, 'eth': 1, 'vpn': 2, 'other': 3}
         keys = sorted(self._nic_tiles.keys(),
                       key=lambda k: (order_key.get(self._nic_tiles[k].get('kind', 'other'), 9), k))
-        for i, iface in enumerate(keys):
-            self._network_grid.addWidget(self._nic_tiles[iface]['frame'], i // 2, i % 2)
+        self._fill_paired_grid(
+            self._network_grid,
+            [self._nic_tiles[k]['frame'] for k in keys])
 
     def _device_subheader(self, name, detail):
         row = QHBoxLayout(); row.setSpacing(8)
@@ -2516,7 +2581,7 @@ class LOQControl(QWidget):
 
     def _make_metric_tile(self, label, color, show_bar=False, bar_max=100,
                           primary='--', secondary='', fixed_max=None,
-                          fmt=None):
+                          fmt=None, color2=None, label1='', label2=''):
         frame = QFrame()
         frame.setStyleSheet(
             f'QFrame {{ background: {T["BG"]}; '
@@ -2555,7 +2620,8 @@ class LOQControl(QWidget):
                 f'border-radius: 2px; }}')
             lay.addWidget(bar)
         spark = Sparkline(color=color, height=46, fixed_max=fixed_max,
-                          fmt=fmt)
+                          fmt=fmt, color2=color2,
+                          label1=label1, label2=label2)
         lay.addWidget(spark)
         return {'frame': frame, 'label': lbl, 'primary': pri,
                 'secondary': sec, 'bar': bar, 'spark': spark,
@@ -2660,13 +2726,14 @@ class LOQControl(QWidget):
         self.temp_graph.add(cpu_temp, gpu_temp)
 
         # Throttle — only flag if actively increasing
-        throttle = []
+        cpu_throttling = False
+        gpu_throttling = []
         try:
             tc = int(read_sys(
                 '/sys/devices/system/cpu/cpu0/thermal_throttle/'
                 'package_throttle_count') or '0')
             if tc > self._prev_throttle:
-                throttle.append('CPU Thermal')
+                cpu_throttling = True
             self._prev_throttle = tc
         except Exception:
             pass
@@ -2675,13 +2742,42 @@ class LOQControl(QWidget):
                            'hw_slowdown']:
                 v = nvidia_query(f'clocks_throttle_reasons.{reason}')[0]
                 if v == 'Active':
-                    throttle.append(reason.replace('_', ' ').title())
+                    gpu_throttling.append(reason.replace('_', ' ').title())
         except Exception:
             pass
-        self.throttle_lbl.setText(
-            'THROTTLED: ' + ', '.join(throttle) if throttle else '')
+
+        # Inline throttle indicator + temp-based label coloring on temp tiles
+        self._update_temp_tile('cpu_tmp', cpu_temp,
+                               'CPU Thermal' if cpu_throttling else '')
+        self._update_temp_tile('gpu_tmp', gpu_temp,
+                               ', '.join(gpu_throttling))
 
         self.refresh_activity()
+
+    def _update_temp_tile(self, key, temp, throttle_text):
+        tile = self._sensor_tiles.get(key)
+        if not tile:
+            return
+        # Threshold-based color: < 75 normal, 75-85 warning, > 85 danger
+        if temp >= 85:
+            label_color = '#ff4444'
+        elif temp >= 75:
+            label_color = '#ffb066'
+        else:
+            label_color = T['TEXT_MUTED']
+        tile['label'].setStyleSheet(
+            f'color: {label_color}; border: none; background: transparent; '
+            f'letter-spacing: 1.5px;')
+        if throttle_text:
+            tile['secondary'].setText(f'THROTTLED · {throttle_text}')
+            tile['secondary'].setStyleSheet(
+                'color: #ff4444; border: none; background: transparent;')
+        else:
+            peak = int(tile['peak']) if tile['peak'] else 0
+            tile['secondary'].setText(
+                f'peak {peak}°C' if peak else 'peak --')
+            tile['secondary'].setStyleSheet(
+                f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
 
     def _set_sensor(self, key, value, text, peak_fmt=None):
         tile = self._sensor_tiles.get(key)
@@ -2744,13 +2840,14 @@ class LOQControl(QWidget):
         # ── Storage (per-drive) ─────────────────────────────────────
         drives = list_drives()
         current_devs = {d['dev'] for d in drives}
+        relayout = False
         for dev in list(self._drive_tiles.keys()):
             if dev not in current_devs:
                 self._drive_tiles[dev]['frame'].setParent(None)
                 del self._drive_tiles[dev]
                 self._prev_drive_stats.pop(dev, None)
+                relayout = True
         cur_disk = read_disk_stats()
-        relayout = False
         for d in drives:
             dev = d['dev']
             if dev not in self._drive_tiles:
@@ -2764,9 +2861,8 @@ class LOQControl(QWidget):
                 w = int(max(0, cw - pw) * 512 / elapsed)
                 tile['primary'].setText(
                     f'R {fmt_rate(r)} · W {fmt_rate(w)}')
-                combined = r + w
-                tile['peak'] = max(tile['peak'], combined)
-                tile['spark'].add(combined)
+                tile['peak'] = max(tile['peak'], r, w)
+                tile['spark'].add_pair(r, w)
             if dev in cur_disk:
                 self._prev_drive_stats[dev] = cur_disk[dev]
             used, total = drive_usage(dev)
@@ -2791,13 +2887,14 @@ class LOQControl(QWidget):
         # ── Network (per-NIC) ───────────────────────────────────────
         nics = list_active_nics()
         current_ifaces = {n['iface'] for n in nics}
+        relayout = False
         for iface in list(self._nic_tiles.keys()):
             if iface not in current_ifaces:
                 self._nic_tiles[iface]['frame'].setParent(None)
                 del self._nic_tiles[iface]
                 self._prev_nic_stats.pop(iface, None)
+                relayout = True
         cur_net = read_net_stats()
-        relayout = False
         for n in nics:
             iface = n['iface']
             existed = iface in self._nic_tiles
@@ -2812,7 +2909,7 @@ class LOQControl(QWidget):
                 tx = int(max(0, ctx - ptx) / elapsed)
                 tile['primary'].setText(
                     f'↓ {fmt_rate(rx)} · ↑ {fmt_rate(tx)}')
-                tile['spark'].add(rx + tx)
+                tile['spark'].add_pair(rx, tx)
             if iface in cur_net:
                 self._prev_nic_stats[iface] = cur_net[iface]
         if relayout:
@@ -2912,12 +3009,10 @@ class LOQControl(QWidget):
         syspow_t = self._batt_tiles['system_power']
         health_t = self._batt_tiles['health']
 
-        # Long-span sparklines: only feed every BATTERY_SPARK_INTERVAL
-        # seconds so 60 samples span hours rather than minutes.
-        BATTERY_SPARK_INTERVAL = 180  # 3 min/sample → 3 hours of history
+        # Feed graphs every tick so all four tiles render a live curve.
+        # (The CSV log still tracks day-over-day health for the caption.)
         now_mono = time.monotonic()
-        do_sample = (now_mono - self._battery_spark_last
-                     >= BATTERY_SPARK_INTERVAL)
+        do_sample = True
 
         # ── System power (CPU + GPU) — works AC or battery ─────────
         cpu_w = 0.0
@@ -3028,6 +3123,8 @@ class LOQControl(QWidget):
             if health_t['bar'] is not None:
                 health_t['bar'].setValue(min(h_pct, 100))
             health_t['primary'].setText(f'{h_pct}%')
+            if do_sample:
+                health_t['spark'].add(h_pct)
             wh_now = full / 1e6
             wh_design = design / 1e6
             cyc_raw = read_sys(f'{bp}/cycle_count')
