@@ -1889,43 +1889,49 @@ class LOQControl(QWidget):
         self._sensor_tiles['cpu_util'] = self._make_metric_tile(
             'CPU UTIL', '#4cc4ff', primary='--%', secondary='peak --',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
+        self._sensor_tiles['cpu_pwr'] = self._make_metric_tile(
+            'CPU POWER', '#ffa94d', primary='-- W', secondary='peak --',
+            fmt=lambda v: f'{v:.1f} W')
         self._sensor_tiles['cpu_clk'] = self._make_metric_tile(
-            'CPU CLOCK', '#a4d3ff', primary='-- MHz', secondary='',
+            'CPU CLOCK', '#6c8aff', primary='-- MHz', secondary='',
             fmt=lambda v: f'{int(v)} MHz')
         self._sensor_tiles['cpu_tmp'] = self._make_metric_tile(
-            'CPU TEMP', '#ff7a7a', primary='--°C', secondary='peak --',
+            'CPU TEMP', '#ff6b6b', primary='--°C', secondary='peak --',
             fixed_max=105, fmt=lambda v: f'{int(v)}°C')
         self._sensor_tiles['cpu_fan'] = self._make_metric_tile(
-            'CPU FAN', '#9affc4', primary='-- RPM', secondary='',
+            'CPU FAN', '#4dd0c4', primary='-- RPM', secondary='',
             fmt=lambda v: f'{int(v)} RPM')
         self._sensor_tiles['gpu_util'] = self._make_metric_tile(
             'GPU UTIL', '#7cffb4', primary='--%', secondary='peak --',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
-        self._sensor_tiles['gpu_clk'] = self._make_metric_tile(
-            'GPU CLOCK', '#a4ffd2', primary='-- MHz', secondary='',
-            fmt=lambda v: f'{int(v)} MHz')
         self._sensor_tiles['gpu_mem'] = self._make_metric_tile(
-            'GPU MEM CLK', '#c096ff', primary='-- MHz', secondary='',
+            'GPU MEM CLK', '#b794ff', primary='-- MHz', secondary='',
+            fmt=lambda v: f'{int(v)} MHz')
+        self._sensor_tiles['gpu_clk'] = self._make_metric_tile(
+            'GPU CLOCK', '#bef27a', primary='-- MHz', secondary='',
             fmt=lambda v: f'{int(v)} MHz')
         self._sensor_tiles['gpu_tmp'] = self._make_metric_tile(
-            'GPU TEMP', '#ff7a7a', primary='--°C', secondary='peak --',
+            'GPU TEMP', '#ff6b6b', primary='--°C', secondary='peak --',
             fixed_max=105, fmt=lambda v: f'{int(v)}°C')
         self._sensor_tiles['gpu_fan'] = self._make_metric_tile(
-            'GPU FAN', '#ffb066', primary='-- RPM', secondary='',
+            'GPU FAN', '#4dd0c4', primary='-- RPM', secondary='',
             fmt=lambda v: f'{int(v)} RPM')
 
-        # Row 0: UTIL / UTIL · Row 1: CLOCK / CLOCK
-        # Row 2: TEMP / TEMP · Row 3: FAN / FAN
-        # Row 4: GPU MEM CLK spans both cols (no CPU counterpart)
+        # Row 0: UTIL    / UTIL
+        # Row 1: POWER   / MEM CLK
+        # Row 2: CLOCK   / CLOCK
+        # Row 3: TEMP    / TEMP
+        # Row 4: FAN     / FAN
         grid.addWidget(self._sensor_tiles['cpu_util']['frame'], 0, 0)
         grid.addWidget(self._sensor_tiles['gpu_util']['frame'], 0, 1)
-        grid.addWidget(self._sensor_tiles['cpu_clk']['frame'], 1, 0)
-        grid.addWidget(self._sensor_tiles['gpu_clk']['frame'], 1, 1)
-        grid.addWidget(self._sensor_tiles['cpu_tmp']['frame'], 2, 0)
-        grid.addWidget(self._sensor_tiles['gpu_tmp']['frame'], 2, 1)
-        grid.addWidget(self._sensor_tiles['cpu_fan']['frame'], 3, 0)
-        grid.addWidget(self._sensor_tiles['gpu_fan']['frame'], 3, 1)
-        grid.addWidget(self._sensor_tiles['gpu_mem']['frame'], 4, 0, 1, 2)
+        grid.addWidget(self._sensor_tiles['cpu_pwr']['frame'], 1, 0)
+        grid.addWidget(self._sensor_tiles['gpu_mem']['frame'], 1, 1)
+        grid.addWidget(self._sensor_tiles['cpu_clk']['frame'], 2, 0)
+        grid.addWidget(self._sensor_tiles['gpu_clk']['frame'], 2, 1)
+        grid.addWidget(self._sensor_tiles['cpu_tmp']['frame'], 3, 0)
+        grid.addWidget(self._sensor_tiles['gpu_tmp']['frame'], 3, 1)
+        grid.addWidget(self._sensor_tiles['cpu_fan']['frame'], 4, 0)
+        grid.addWidget(self._sensor_tiles['gpu_fan']['frame'], 4, 1)
         vbox.addLayout(grid)
 
         # Per-core bar chart
@@ -1985,25 +1991,25 @@ class LOQControl(QWidget):
         grid.setColumnStretch(0, 1); grid.setColumnStretch(1, 1)
         self._batt_tiles = {}
         self._batt_tiles['charge'] = self._make_metric_tile(
-            'CHARGE', '#9affc4', show_bar=True, bar_max=100,
+            'CHARGE', '#7cffb4', show_bar=True, bar_max=100,
             primary='--%', secondary='--',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
         # Battery's own power_now reading — what the battery is sourcing
         # or sinking. Will be tiny on AC (just trickle maintenance),
         # meaningful when discharging.
         self._batt_tiles['batt_draw'] = self._make_metric_tile(
-            'BATTERY DRAW', '#ffb066',
+            'BATTERY DRAW', '#ffa94d',
             primary='-- W', secondary='peak --',
             fmt=lambda v: f'{v:.2f} W')
         # CPU package (RAPL) + GPU (nvidia-smi power.draw) — the bulk
         # of what's actually being consumed by the system, regardless
         # of whether AC is plugged in.
         self._batt_tiles['system_power'] = self._make_metric_tile(
-            'SYSTEM POWER', '#ff7a7a',
+            'SYSTEM POWER', '#ff7ab6',
             primary='-- W', secondary='CPU -- · GPU --',
             fmt=lambda v: f'{v:.1f} W')
         self._batt_tiles['health'] = self._make_metric_tile(
-            'HEALTH', '#4cc4ff', show_bar=True, bar_max=100,
+            'HEALTH', '#4dd0c4', show_bar=True, bar_max=100,
             primary='--%', secondary='--',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
         # Seed health sparkline with historical readings so it has a curve.
@@ -2416,7 +2422,7 @@ class LOQControl(QWidget):
         vbox.addLayout(self._device_subheader('MEMORY', ram_total_str))
 
         self._activity_tiles['ram'] = self._make_metric_tile(
-            'RAM', '#4cc4ff', show_bar=True, bar_max=100,
+            'RAM', '#5fc7e8', show_bar=True, bar_max=100,
             primary='-- / -- GB', secondary='--', fixed_max=100,
             fmt=lambda v: f'{int(v)}%')
         self._activity_order.append('ram')
@@ -2480,11 +2486,11 @@ class LOQControl(QWidget):
         size_str = fmt_bytes(size)
         label = f'/dev/{dev}'.upper()
         tile = self._make_metric_tile(
-            label, '#4cc4ff',  # read = blue
+            label, '#5fc7e8',  # read = sky
             primary='R -- · W --',
             secondary=(model[:24] + '…') if len(model) > 25 else (model or size_str),
             fmt=lambda v: fmt_rate(int(v)),
-            color2='#ffb066', label1='R ', label2='W ')  # write = orange
+            color2='#ffa94d', label1='R ', label2='W ')  # write = amber
         # Capacity bar shows used %; rates feed sparkline
         tile['cap_bar'] = QProgressBar()
         tile['cap_bar'].setRange(0, 100); tile['cap_bar'].setTextVisible(False)
@@ -2492,7 +2498,7 @@ class LOQControl(QWidget):
         tile['cap_bar'].setStyleSheet(
             f'QProgressBar {{ background: {T["BORDER"]}; border: none; '
             f'border-radius: 2px; }} '
-            f'QProgressBar::chunk {{ background: #ffb066; '
+            f'QProgressBar::chunk {{ background: #5fc7e8; '
             f'border-radius: 2px; }}')
         tile['cap_label'] = QLabel('-- / -- · --°C')
         tile['cap_label'].setFont(QFont(FONT, 8))
@@ -2513,14 +2519,14 @@ class LOQControl(QWidget):
             # update info line if changed
             tile['info'].setText(self._nic_info_text(kind, ssid, ip))
             return tile
-        color = {'wifi': '#7cffb4', 'eth': '#4cc4ff',
-                 'vpn': '#c096ff'}.get(kind, '#a0a0a0')
+        color = {'wifi': '#7cffb4', 'eth': '#5fc7e8',
+                 'vpn': '#b794ff'}.get(kind, '#a0a0a0')
         label = iface.upper()
         tile = self._make_metric_tile(
             label, color, primary='↓ -- · ↑ --',
             secondary=kind.upper(),
             fmt=lambda v: fmt_rate(int(v)),
-            color2='#ffb066', label1='↓ ', label2='↑ ')  # up = orange
+            color2='#ffa94d', label1='↓ ', label2='↑ ')  # up = amber
         info = QLabel(self._nic_info_text(kind, ssid, ip))
         info.setFont(QFont(FONT, 8))
         info.setStyleSheet(
@@ -2700,6 +2706,32 @@ class LOQControl(QWidget):
         except (ValueError, TypeError):
             pass
 
+        # CPU package power (RAPL energy delta \u2192 watts).
+        # Shared with the battery card so it doesn't have to recompute.
+        cpu_w = 0.0
+        e_now = read_cpu_package_energy_uj()
+        e_prev, t_prev = self._cpu_energy_prev
+        now_mono = time.monotonic()
+        if e_now is not None and e_prev is not None:
+            dt_e = now_mono - t_prev
+            if dt_e > 0.1:
+                delta_uj = e_now - e_prev
+                if delta_uj < 0:
+                    mx = read_cpu_max_energy_uj()
+                    if mx:
+                        delta_uj += mx
+                if delta_uj >= 0:
+                    cpu_w = (delta_uj / 1e6) / dt_e
+        self._cpu_energy_prev = (e_now, now_mono)
+        self._last_cpu_w = cpu_w
+        pwr_tile = self._sensor_tiles.get('cpu_pwr')
+        if pwr_tile is not None:
+            pwr_tile['primary'].setText(f'{cpu_w:.1f} W')
+            pwr_tile['peak'] = max(pwr_tile['peak'], cpu_w)
+            pwr_tile['secondary'].setText(
+                f'peak {pwr_tile["peak"]:.1f} W')
+            pwr_tile['spark'].add(cpu_w)
+
         # Fans
         cpu_rpm, gpu_rpm = read_fan_rpm()
         self._set_sensor('cpu_fan', cpu_rpm, f'{cpu_rpm} RPM')
@@ -2760,9 +2792,9 @@ class LOQControl(QWidget):
             return
         # Threshold-based color: < 75 normal, 75-85 warning, > 85 danger
         if temp >= 85:
-            label_color = '#ff4444'
+            label_color = '#ff6b6b'
         elif temp >= 75:
-            label_color = '#ffb066'
+            label_color = '#ffa94d'
         else:
             label_color = T['TEXT_MUTED']
         tile['label'].setStyleSheet(
@@ -2771,7 +2803,7 @@ class LOQControl(QWidget):
         if throttle_text:
             tile['secondary'].setText(f'THROTTLED · {throttle_text}')
             tile['secondary'].setStyleSheet(
-                'color: #ff4444; border: none; background: transparent;')
+                'color: #ff6b6b; border: none; background: transparent;')
         else:
             peak = int(tile['peak']) if tile['peak'] else 0
             tile['secondary'].setText(
@@ -2815,7 +2847,7 @@ class LOQControl(QWidget):
         if swap_total > 0:
             if 'swap' not in self._activity_tiles:
                 self._activity_tiles['swap'] = self._make_metric_tile(
-                    'SWAP', '#c096ff', show_bar=True, bar_max=100,
+                    'SWAP', '#b794ff', show_bar=True, bar_max=100,
                     primary='-- / -- GB', secondary='--',
                     fixed_max=100, fmt=lambda v: f'{int(v)}%')
                 self._activity_order.append('swap')
@@ -3015,20 +3047,8 @@ class LOQControl(QWidget):
         do_sample = True
 
         # ── System power (CPU + GPU) — works AC or battery ─────────
-        cpu_w = 0.0
-        e_now = read_cpu_package_energy_uj()
-        e_prev, t_prev = self._cpu_energy_prev
-        if e_now is not None and e_prev is not None:
-            dt = now_mono - t_prev
-            if dt > 0.1:
-                delta_uj = e_now - e_prev
-                if delta_uj < 0:  # wrap-around
-                    mx = read_cpu_max_energy_uj()
-                    if mx:
-                        delta_uj += mx
-                if delta_uj >= 0:
-                    cpu_w = (delta_uj / 1e6) / dt
-        self._cpu_energy_prev = (e_now, now_mono)
+        # CPU watts are computed in refresh_sensors and cached for reuse.
+        cpu_w = getattr(self, '_last_cpu_w', 0.0)
         gpu_w = read_gpu_power_draw() or 0.0
         sys_w = cpu_w + gpu_w
         syspow_t['primary'].setText(f'{sys_w:.1f} W')
@@ -3059,8 +3079,8 @@ class LOQControl(QWidget):
         names = {'Charging': 'CHARGING', 'Discharging': 'ON BATTERY',
                  'Full': 'FULL', 'Not charging': 'IDLE'}
         status_color = {
-            'Charging': '#9affc4', 'Discharging': '#ffb066',
-            'Full': '#4cc4ff', 'Not charging': '#c096ff',
+            'Charging': '#7cffb4', 'Discharging': '#ffa94d',
+            'Full': '#4dd0c4', 'Not charging': '#b794ff',
         }.get(status, T['TEXT_MUTED'])
         self.batt_status_lbl.setText(names.get(status, status.upper() or '—'))
         self.batt_status_lbl.setStyleSheet(
