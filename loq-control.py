@@ -386,6 +386,23 @@ def find_battery():
     return None
 
 
+def fix_rapl_perms():
+    """RAPL energy_uj is root-only on modern kernels (PLATYPUS
+    mitigation). Make the package energy counters readable so the
+    monitor can sample CPU watts without spawning sudo each tick."""
+    paths = glob.glob('/sys/class/powercap/intel-rapl:[0-9]*/energy_uj')
+    if not paths:
+        return
+    try:
+        subprocess.run(
+            ['sudo', '-n', 'chmod', 'a+r', *paths],
+            check=False, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=3)
+    except Exception:
+        pass
+
+
 def read_cpu_package_energy_uj():
     """Cumulative CPU package energy counter in microjoules (RAPL).
 
@@ -1571,9 +1588,14 @@ class LOQControl(QWidget):
         self._prev_net = read_net_stats()
         self._prev_disk = read_disk_stats()
         self._prev_time = time.monotonic()
-        # CPU package energy tracking for system power (W) calc
+        # CPU package energy tracking for system power (W) calc.
+        # The RAPL energy_uj file is root-only since the PLATYPUS
+        # mitigations — chmod it once at startup so refreshes can read
+        # it as the user.
+        fix_rapl_perms()
         self._cpu_energy_prev = (read_cpu_package_energy_uj(),
                                  time.monotonic())
+        self._last_cpu_w = 0.0
         # Last sample-tick timestamps for long-span battery sparklines
         self._battery_spark_last = 0.0
         self.rapl = get_rapl_info()
@@ -2485,12 +2507,14 @@ class LOQControl(QWidget):
             return self._drive_tiles[dev]
         size_str = fmt_bytes(size)
         label = f'/dev/{dev}'.upper()
+        primary = '#5fc7e8'  # read
+        secondary_line = QColor(primary).lighter(140).name()  # write
         tile = self._make_metric_tile(
-            label, '#5fc7e8',  # read = sky
+            label, primary,
             primary='R -- · W --',
             secondary=(model[:24] + '…') if len(model) > 25 else (model or size_str),
             fmt=lambda v: fmt_rate(int(v)),
-            color2='#ffa94d', label1='R ', label2='W ')  # write = amber
+            color2=secondary_line, label1='R ', label2='W ')
         # Capacity bar shows used %; rates feed sparkline
         tile['cap_bar'] = QProgressBar()
         tile['cap_bar'].setRange(0, 100); tile['cap_bar'].setTextVisible(False)
@@ -2521,12 +2545,13 @@ class LOQControl(QWidget):
             return tile
         color = {'wifi': '#7cffb4', 'eth': '#5fc7e8',
                  'vpn': '#b794ff'}.get(kind, '#a0a0a0')
+        color_up = QColor(color).lighter(140).name()
         label = iface.upper()
         tile = self._make_metric_tile(
             label, color, primary='↓ -- · ↑ --',
             secondary=kind.upper(),
             fmt=lambda v: fmt_rate(int(v)),
-            color2='#ffa94d', label1='↓ ', label2='↑ ')  # up = amber
+            color2=color_up, label1='↓ ', label2='↑ ')
         info = QLabel(self._nic_info_text(kind, ssid, ip))
         info.setFont(QFont(FONT, 8))
         info.setStyleSheet(
