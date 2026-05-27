@@ -161,30 +161,30 @@ def save_config(cfg):
 
 THEMES = {
     'dark': dict(
-        BG='#000000', CARD='#171717', BORDER='#1f1f1f',
-        TEXT='#ededed', TEXT_DIM='#a3a3a3', TEXT_MUTED='#525252',
-        BTN_DEF='#171717', BTN_HOVER='#1f1f1f',
-        BTN_ACT='#ededed', BTN_ACT_T='#000000', BTN_ACT_H='#fafafa',
-        TOG_ON='#ededed', TOG_OFF='#171717', TOG_ON_H='#fafafa',
-        GR_GRID='#262626', GR_TEXT='#525252',
-        CORE_LO='#1f1f1f', CORE_MED='#525252',
-        CORE_HI='#a3a3a3', CORE_MAX='#ededed',
+        BG='#0a0a0a', CARD='#141414', BORDER='#222222',
+        TEXT='#ffffff', TEXT_DIM='#888888', TEXT_MUTED='#555555',
+        BTN_DEF='#1a1a1a', BTN_HOVER='#252525',
+        BTN_ACT='#ffffff', BTN_ACT_T='#000000', BTN_ACT_H='#dddddd',
+        TOG_ON='#e0e0e0', TOG_OFF='#1a1a1a', TOG_ON_H='#cccccc',
+        GR_GRID='#333333', GR_TEXT='#555555',
+        CORE_LO='#222222', CORE_MED='#555555',
+        CORE_HI='#888888', CORE_MAX='#ffffff',
     ),
     'light': dict(
-        BG='#fafafa', CARD='#ffffff', BORDER='#ededed',
-        TEXT='#0a0a0a', TEXT_DIM='#525252', TEXT_MUTED='#a3a3a3',
-        BTN_DEF='#f5f5f5', BTN_HOVER='#ededed',
-        BTN_ACT='#0a0a0a', BTN_ACT_T='#ffffff', BTN_ACT_H='#262626',
-        TOG_ON='#0a0a0a', TOG_OFF='#ededed', TOG_ON_H='#262626',
-        GR_GRID='#ededed', GR_TEXT='#a3a3a3',
-        CORE_LO='#ededed', CORE_MED='#a3a3a3',
-        CORE_HI='#525252', CORE_MAX='#0a0a0a',
+        BG='#f0f0f0', CARD='#ffffff', BORDER='#d0d0d0',
+        TEXT='#1a1a1a', TEXT_DIM='#666666', TEXT_MUTED='#999999',
+        BTN_DEF='#e8e8e8', BTN_HOVER='#d8d8d8',
+        BTN_ACT='#1a1a1a', BTN_ACT_T='#ffffff', BTN_ACT_H='#333333',
+        TOG_ON='#333333', TOG_OFF='#e0e0e0', TOG_ON_H='#444444',
+        GR_GRID='#cccccc', GR_TEXT='#999999',
+        CORE_LO='#e0e0e0', CORE_MED='#aaaaaa',
+        CORE_HI='#666666', CORE_MAX='#1a1a1a',
     ),
 }
 
 _cfg = load_config()
 T = THEMES.get(_cfg.get('theme', 'dark'), THEMES['dark'])
-FONT = 'Geist Mono'
+FONT = 'JetBrains Mono'
 IDEAPAD = '/sys/bus/platform/drivers/ideapad_acpi/VPC2004:00'
 RAPL = '/sys/class/powercap/intel-rapl:0'
 MEM_LEVELS = [0, 9001, 11001, 12001]
@@ -213,20 +213,20 @@ CARD_STYLE = f"""
     QFrame {{
         background-color: {T['CARD']};
         border: 1px solid {T['BORDER']};
-        border-radius: 12px;
+        border-radius: 10px;
     }}
 """
 SLIDER_STYLE = f"""
     QSlider {{ background: transparent; border: none; min-height: 26px; }}
     QSlider::groove:horizontal {{
-        background: {T['BORDER']}; height: 6px; border-radius: 5px;
+        background: {T['BORDER']}; height: 6px; border-radius: 3px;
     }}
     QSlider::handle:horizontal {{
         background: {T['TEXT']}; width: 16px; height: 16px;
         margin: -5px 0; border-radius: 8px;
     }}
     QSlider::sub-page:horizontal {{
-        background: {T['TEXT_DIM']}; border-radius: 5px;
+        background: {T['TEXT_DIM']}; border-radius: 3px;
     }}
 """
 # Slightly taller / accent variant used by overclock sliders so the ticks
@@ -235,7 +235,7 @@ OC_SLIDER_STYLE = f"""
     QSlider {{ background: transparent; border: none; min-height: 38px;
                padding: 0; }}
     QSlider::groove:horizontal {{
-        background: {T['BORDER']}; height: 6px; border-radius: 5px;
+        background: {T['BORDER']}; height: 6px; border-radius: 3px;
     }}
     QSlider::handle:horizontal {{
         background: {T['TEXT']}; width: 16px; height: 16px;
@@ -243,7 +243,7 @@ OC_SLIDER_STYLE = f"""
         border: 2px solid {T['BG']};
     }}
     QSlider::sub-page:horizontal {{
-        background: {T['TEXT_DIM']}; border-radius: 5px;
+        background: {T['TEXT_DIM']}; border-radius: 3px;
     }}
     QSlider::tick-mark:horizontal {{
         background: {T['BORDER']};
@@ -251,11 +251,11 @@ OC_SLIDER_STYLE = f"""
 """
 BAR_STYLE = f"""
     QProgressBar {{
-        background: {T['BORDER']}; border: none; border-radius: 5px;
+        background: {T['BORDER']}; border: none; border-radius: 4px;
         max-height: 10px; min-height: 10px;
     }}
     QProgressBar::chunk {{
-        background: {T['TEXT_DIM']}; border-radius: 5px;
+        background: {T['TEXT_DIM']}; border-radius: 4px;
     }}
 """
 MSG_STYLE = f"""
@@ -263,7 +263,7 @@ MSG_STYLE = f"""
     QMessageBox QLabel {{ color: {T['TEXT']}; font-family: '{FONT}'; }}
     QMessageBox QPushButton {{
         background-color: {T['BTN_DEF']}; color: {T['TEXT']};
-        border: 1px solid {T['BORDER']}; border-radius: 8px;
+        border: 1px solid {T['BORDER']}; border-radius: 6px;
         padding: 6px 16px; font-family: '{FONT}'; min-width: 60px;
     }}
     QMessageBox QPushButton:hover {{ background-color: {T['BTN_HOVER']}; }}
@@ -274,7 +274,7 @@ SCROLL_STYLE = f"""
         background: {T['BG']}; width: 6px; border: none;
     }}
     QScrollBar::handle:vertical {{
-        background: {T['BORDER']}; border-radius: 5px; min-height: 30px;
+        background: {T['BORDER']}; border-radius: 3px; min-height: 30px;
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0; background: none;
@@ -784,12 +784,12 @@ class TempGraph(QWidget):
             for i in range(len(pts) - 1):
                 p.drawLine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
 
-        draw(cpu_pts, '#0070f3')
-        draw(gpu_pts, '#ff4d4d')
+        draw(cpu_pts, '#4488ff')
+        draw(gpu_pts, '#ff4444')
         p.setFont(QFont(FONT, 7, QFont.Bold))
-        p.setPen(QPen(QColor('#0070f3'), 1))
+        p.setPen(QPen(QColor('#4488ff'), 1))
         p.drawText(ml + 5, h - 4, 'CPU')
-        p.setPen(QPen(QColor('#ff4d4d'), 1))
+        p.setPen(QPen(QColor('#ff4444'), 1))
         p.drawText(ml + 40, h - 4, 'GPU')
 
         # hover crosshair
@@ -812,11 +812,11 @@ class TempGraph(QWidget):
         cv = self.cpu[best_i] if best_i < len(self.cpu) else None
         gv = self.gpu[best_i] if best_i < len(self.gpu) else None
         if cv is not None and cpu_pts:
-            p.setBrush(QColor('#0070f3')); p.setPen(QPen(QColor(T['BG']), 1.2))
+            p.setBrush(QColor('#4488ff')); p.setPen(QPen(QColor(T['BG']), 1.2))
             cy = cpu_pts[best_i][1]
             p.drawEllipse(hx - 3, cy - 3, 6, 6)
         if gv is not None and gpu_pts:
-            p.setBrush(QColor('#ff4d4d')); p.setPen(QPen(QColor(T['BG']), 1.2))
+            p.setBrush(QColor('#ff4444')); p.setPen(QPen(QColor(T['BG']), 1.2))
             gy = gpu_pts[best_i][1]
             p.drawEllipse(hx - 3, gy - 3, 6, 6)
         parts = []
@@ -942,7 +942,7 @@ class Sparkline(QWidget):
       - Hover crosshair + value tooltip when mouse is over the graph
     """
 
-    def __init__(self, max_pts=60, color='#79ffe1', height=46,
+    def __init__(self, max_pts=60, color='#4cc4ff', height=46,
                  fixed_max=None, fmt=None, color2=None,
                  label1='', label2=''):
         super().__init__()
@@ -1282,7 +1282,7 @@ class ProcessManagerWindow(QWidget):
         self._search.setStyleSheet(f"""
             QLineEdit {{
                 background: {T['CARD']}; color: {T['TEXT']};
-                border: 1px solid {T['BORDER']}; border-radius: 8px;
+                border: 1px solid {T['BORDER']}; border-radius: 6px;
                 padding: 8px 12px;
             }}
             QLineEdit:focus {{ border-color: {T['TEXT_DIM']}; }}
@@ -1296,10 +1296,10 @@ class ProcessManagerWindow(QWidget):
         kill_btn.setMinimumHeight(36)
         kill_btn.setStyleSheet(f"""
             QPushButton {{
-                background: #e60000; color: #ffffff;
-                border: none; border-radius: 8px; padding: 8px 16px;
+                background: #cc3333; color: #ffffff;
+                border: none; border-radius: 6px; padding: 8px 16px;
             }}
-            QPushButton:hover {{ background: #b30000; }}
+            QPushButton:hover {{ background: #aa2222; }}
         """)
         kill_btn.clicked.connect(self._kill_selected)
         tb.addWidget(kill_btn)
@@ -1310,10 +1310,10 @@ class ProcessManagerWindow(QWidget):
         fkill_btn.setMinimumHeight(36)
         fkill_btn.setStyleSheet(f"""
             QPushButton {{
-                background: #cc0000; color: #ffffff;
-                border: none; border-radius: 8px; padding: 8px 16px;
+                background: #881111; color: #ffffff;
+                border: none; border-radius: 6px; padding: 8px 16px;
             }}
-            QPushButton:hover {{ background: #990000; }}
+            QPushButton:hover {{ background: #660000; }}
         """)
         fkill_btn.clicked.connect(lambda: self._kill_selected(force=True))
         tb.addWidget(fkill_btn)
@@ -1368,7 +1368,7 @@ class ProcessManagerWindow(QWidget):
                 background: {T['CARD']}; width: 6px; border: none;
             }}
             QScrollBar::handle:vertical {{
-                background: {T['BORDER']}; border-radius: 5px;
+                background: {T['BORDER']}; border-radius: 3px;
                 min-height: 30px;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
@@ -1778,7 +1778,7 @@ class LOQControl(QWidget):
             b.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {T['TOG_ON']}; color: {T['BTN_ACT_T']};
-                    border: 1px solid {T['TOG_ON']}; border-radius: 8px;
+                    border: 1px solid {T['TOG_ON']}; border-radius: 6px;
                 }}
                 QPushButton:hover {{
                     background-color: {T['TOG_ON_H']};
@@ -1789,7 +1789,7 @@ class LOQControl(QWidget):
             b.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {T['TOG_OFF']}; color: {T['TEXT_MUTED']};
-                    border: 1px solid {T['BORDER']}; border-radius: 8px;
+                    border: 1px solid {T['BORDER']}; border-radius: 6px;
                 }}
                 QPushButton:hover {{
                     background-color: {T['BTN_HOVER']}; color: {T['TEXT_DIM']};
@@ -1910,35 +1910,35 @@ class LOQControl(QWidget):
         grid.setColumnStretch(0, 1); grid.setColumnStretch(1, 1)
 
         self._sensor_tiles['cpu_util'] = self._make_metric_tile(
-            'CPU UTIL', '#79ffe1', primary='--%', secondary='peak --',
+            'CPU UTIL', '#4cc4ff', primary='--%', secondary='peak --',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
         self._sensor_tiles['uptime'] = self._make_metric_tile(
-            'UPTIME', '#bf7af0', primary='--', secondary='since boot')
+            'UPTIME', '#d9c1ff', primary='--', secondary='since boot')
         # Uptime is monotonic — sparkline would be a flat slope, hide it
         self._sensor_tiles['uptime']['spark'].setVisible(False)
         self._sensor_tiles['cpu_clk'] = self._make_metric_tile(
-            'CPU CLOCK', '#0070f3', primary='-- MHz', secondary='',
+            'CPU CLOCK', '#6c8aff', primary='-- MHz', secondary='',
             fmt=lambda v: f'{int(v)} MHz')
         self._sensor_tiles['cpu_tmp'] = self._make_metric_tile(
-            'CPU TEMP', '#f5a623', primary='--°C', secondary='peak --',
+            'CPU TEMP', '#ff6b6b', primary='--°C', secondary='peak --',
             fixed_max=105, fmt=lambda v: f'{int(v)}°C')
         self._sensor_tiles['cpu_fan'] = self._make_metric_tile(
-            'CPU FAN', '#50e3c2', primary='-- RPM', secondary='',
+            'CPU FAN', '#4dd0c4', primary='-- RPM', secondary='',
             fmt=lambda v: f'{int(v)} RPM')
         self._sensor_tiles['gpu_util'] = self._make_metric_tile(
-            'GPU UTIL', '#79ffe1', primary='--%', secondary='peak --',
+            'GPU UTIL', '#7cffb4', primary='--%', secondary='peak --',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
         self._sensor_tiles['gpu_mem'] = self._make_metric_tile(
-            'GPU MEM CLK', '#bf7af0', primary='-- MHz', secondary='',
+            'GPU MEM CLK', '#b794ff', primary='-- MHz', secondary='',
             fmt=lambda v: f'{int(v)} MHz')
         self._sensor_tiles['gpu_clk'] = self._make_metric_tile(
-            'GPU CLOCK', '#a7f3d0', primary='-- MHz', secondary='',
+            'GPU CLOCK', '#bef27a', primary='-- MHz', secondary='',
             fmt=lambda v: f'{int(v)} MHz')
         self._sensor_tiles['gpu_tmp'] = self._make_metric_tile(
-            'GPU TEMP', '#f5a623', primary='--°C', secondary='peak --',
+            'GPU TEMP', '#ff6b6b', primary='--°C', secondary='peak --',
             fixed_max=105, fmt=lambda v: f'{int(v)}°C')
         self._sensor_tiles['gpu_fan'] = self._make_metric_tile(
-            'GPU FAN', '#50e3c2', primary='-- RPM', secondary='',
+            'GPU FAN', '#4dd0c4', primary='-- RPM', secondary='',
             fmt=lambda v: f'{int(v)} RPM')
 
         # Row 0: UTIL    / UTIL
@@ -1986,7 +1986,7 @@ class LOQControl(QWidget):
         self.batt_status_lbl.setStyleSheet(
             f'color: {T["TEXT_MUTED"]}; border: none; '
             f'background: transparent; letter-spacing: 1.5px; '
-            f'padding: 2px 8px; border-radius: 5px;')
+            f'padding: 2px 8px; border-radius: 4px;')
         hdr.addWidget(self.batt_status_lbl)
         vbox.addLayout(hdr)
 
@@ -2015,25 +2015,25 @@ class LOQControl(QWidget):
         grid.setColumnStretch(0, 1); grid.setColumnStretch(1, 1)
         self._batt_tiles = {}
         self._batt_tiles['charge'] = self._make_metric_tile(
-            'CHARGE', '#79ffe1', show_bar=True, bar_max=100,
+            'CHARGE', '#7cffb4', show_bar=True, bar_max=100,
             primary='--%', secondary='--',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
         # Battery's own power_now reading — what the battery is sourcing
         # or sinking. Will be tiny on AC (just trickle maintenance),
         # meaningful when discharging.
         self._batt_tiles['batt_draw'] = self._make_metric_tile(
-            'BATTERY DRAW', '#f5a623',
+            'BATTERY DRAW', '#ffa94d',
             primary='-- W', secondary='peak --',
             fmt=lambda v: f'{v:.2f} W')
         # CPU package (RAPL) + GPU (nvidia-smi power.draw) — the bulk
         # of what's actually being consumed by the system, regardless
         # of whether AC is plugged in.
         self._batt_tiles['system_power'] = self._make_metric_tile(
-            'SYSTEM POWER', '#ee87cb',
+            'SYSTEM POWER', '#ff7ab6',
             primary='-- W', secondary='CPU -- · GPU --',
             fmt=lambda v: f'{v:.1f} W')
         self._batt_tiles['health'] = self._make_metric_tile(
-            'HEALTH', '#50e3c2', show_bar=True, bar_max=100,
+            'HEALTH', '#4dd0c4', show_bar=True, bar_max=100,
             primary='--%', secondary='--',
             fixed_max=100, fmt=lambda v: f'{int(v)}%')
         # Seed health sparkline with historical readings so it has a curve.
@@ -2256,7 +2256,7 @@ class LOQControl(QWidget):
         panel = QFrame()
         panel.setStyleSheet(
             f'QFrame {{ background: {T["BG"]}; '
-            f'border: 1px solid {T["BORDER"]}; border-radius: 8px; }}')
+            f'border: 1px solid {T["BORDER"]}; border-radius: 6px; }}')
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(14, 12, 14, 12); lay.setSpacing(8)
 
@@ -2281,14 +2281,14 @@ class LOQControl(QWidget):
             auto_btn._style_off = (
                 f'QPushButton {{ background: transparent; '
                 f'color: {T["TEXT_MUTED"]}; '
-                f'border: 1px solid {T["BORDER"]}; border-radius: 5px; '
+                f'border: 1px solid {T["BORDER"]}; border-radius: 3px; '
                 f'padding: 0 8px; letter-spacing: 1.5px; }} '
                 f'QPushButton:hover {{ color: {T["TEXT"]}; '
                 f'border-color: {T["TEXT_DIM"]}; }}')
             auto_btn._style_on = (
                 f'QPushButton {{ background: {T["BTN_ACT"]}; '
                 f'color: {T["BTN_ACT_T"]}; '
-                f'border: 1px solid {T["BTN_ACT"]}; border-radius: 5px; '
+                f'border: 1px solid {T["BTN_ACT"]}; border-radius: 3px; '
                 f'padding: 0 8px; letter-spacing: 1.5px; }} '
                 f'QPushButton:hover {{ background: {T["BTN_ACT_H"]}; }}')
             auto_btn.setStyleSheet(auto_btn._style_off)
@@ -2446,7 +2446,7 @@ class LOQControl(QWidget):
         vbox.addLayout(self._device_subheader('MEMORY', ram_total_str))
 
         self._activity_tiles['ram'] = self._make_metric_tile(
-            'RAM', '#79ffe1', show_bar=True, bar_max=100,
+            'RAM', '#5fc7e8', show_bar=True, bar_max=100,
             primary='-- / -- GB', secondary='--', fixed_max=100,
             fmt=lambda v: f'{int(v)}%')
         self._activity_order.append('ram')
@@ -2509,7 +2509,7 @@ class LOQControl(QWidget):
             return self._drive_tiles[dev]
         size_str = fmt_bytes(size)
         label = f'/dev/{dev}'.upper()
-        primary = '#79ffe1'  # read
+        primary = '#5fc7e8'  # read
         secondary_line = QColor(primary).lighter(140).name()  # write
         tile = self._make_metric_tile(
             label, primary,
@@ -2545,8 +2545,8 @@ class LOQControl(QWidget):
             # update info line if changed
             tile['info'].setText(self._nic_info_text(kind, ssid, ip))
             return tile
-        color = {'wifi': '#79ffe1', 'eth': '#79ffe1',
-                 'vpn': '#bf7af0'}.get(kind, '#a0a0a0')
+        color = {'wifi': '#7cffb4', 'eth': '#5fc7e8',
+                 'vpn': '#b794ff'}.get(kind, '#a0a0a0')
         color_up = QColor(color).lighter(140).name()
         label = iface.upper()
         tile = self._make_metric_tile(
@@ -2618,7 +2618,7 @@ class LOQControl(QWidget):
         frame = QFrame()
         frame.setStyleSheet(
             f'QFrame {{ background: {T["BG"]}; '
-            f'border: 1px solid {T["BORDER"]}; border-radius: 8px; }}')
+            f'border: 1px solid {T["BORDER"]}; border-radius: 6px; }}')
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(12, 10, 12, 10); lay.setSpacing(6)
         top = QHBoxLayout(); top.setSpacing(8)
@@ -2833,9 +2833,9 @@ class LOQControl(QWidget):
             return
         # Threshold-based color: < 75 normal, 75-85 warning, > 85 danger
         if temp >= 85:
-            label_color = '#f5a623'
+            label_color = '#ff6b6b'
         elif temp >= 75:
-            label_color = '#f5a623'
+            label_color = '#ffa94d'
         else:
             label_color = T['TEXT_MUTED']
         tile['label'].setStyleSheet(
@@ -2888,7 +2888,7 @@ class LOQControl(QWidget):
         if swap_total > 0:
             if 'swap' not in self._activity_tiles:
                 self._activity_tiles['swap'] = self._make_metric_tile(
-                    'SWAP', '#bf7af0', show_bar=True, bar_max=100,
+                    'SWAP', '#b794ff', show_bar=True, bar_max=100,
                     primary='-- / -- GB', secondary='--',
                     fixed_max=100, fmt=lambda v: f'{int(v)}%')
                 self._activity_order.append('swap')
@@ -3114,7 +3114,7 @@ class LOQControl(QWidget):
             self.batt_status_lbl.setStyleSheet(
                 f'color: {T["TEXT_MUTED"]}; border: none; '
                 f'background: transparent; letter-spacing: 1.5px; '
-                f'padding: 2px 8px; border-radius: 5px;')
+                f'padding: 2px 8px; border-radius: 4px;')
             self._style_switch(self.cons_btn, False)
             if do_sample:
                 self._battery_spark_last = now_mono
@@ -3125,14 +3125,14 @@ class LOQControl(QWidget):
         names = {'Charging': 'CHARGING', 'Discharging': 'ON BATTERY',
                  'Full': 'FULL', 'Not charging': 'IDLE'}
         status_color = {
-            'Charging': '#79ffe1', 'Discharging': '#f5a623',
-            'Full': '#50e3c2', 'Not charging': '#bf7af0',
+            'Charging': '#7cffb4', 'Discharging': '#ffa94d',
+            'Full': '#4dd0c4', 'Not charging': '#b794ff',
         }.get(status, T['TEXT_MUTED'])
         self.batt_status_lbl.setText(names.get(status, status.upper() or '—'))
         self.batt_status_lbl.setStyleSheet(
             f'color: {status_color}; border: 1px solid {status_color}; '
             f'background: transparent; letter-spacing: 1.5px; '
-            f'padding: 2px 8px; border-radius: 5px;')
+            f'padding: 2px 8px; border-radius: 4px;')
 
         # ── Charge ──────────────────────────────────────────────────
         try:
