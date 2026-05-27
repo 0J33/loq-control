@@ -161,30 +161,30 @@ def save_config(cfg):
 
 THEMES = {
     'dark': dict(
-        BG='#0a0a0a', CARD='#141414', BORDER='#222222',
-        TEXT='#ffffff', TEXT_DIM='#888888', TEXT_MUTED='#555555',
-        BTN_DEF='#1a1a1a', BTN_HOVER='#252525',
-        BTN_ACT='#ffffff', BTN_ACT_T='#000000', BTN_ACT_H='#dddddd',
-        TOG_ON='#e0e0e0', TOG_OFF='#1a1a1a', TOG_ON_H='#cccccc',
-        GR_GRID='#333333', GR_TEXT='#555555',
-        CORE_LO='#222222', CORE_MED='#555555',
-        CORE_HI='#888888', CORE_MAX='#ffffff',
+        BG='#000000', CARD='#171717', BORDER='#1f1f1f',
+        TEXT='#ededed', TEXT_DIM='#a3a3a3', TEXT_MUTED='#525252',
+        BTN_DEF='#171717', BTN_HOVER='#1f1f1f',
+        BTN_ACT='#ededed', BTN_ACT_T='#000000', BTN_ACT_H='#fafafa',
+        TOG_ON='#ededed', TOG_OFF='#171717', TOG_ON_H='#fafafa',
+        GR_GRID='#262626', GR_TEXT='#525252',
+        CORE_LO='#1f1f1f', CORE_MED='#525252',
+        CORE_HI='#a3a3a3', CORE_MAX='#ededed',
     ),
     'light': dict(
-        BG='#f0f0f0', CARD='#ffffff', BORDER='#d0d0d0',
-        TEXT='#1a1a1a', TEXT_DIM='#666666', TEXT_MUTED='#999999',
-        BTN_DEF='#e8e8e8', BTN_HOVER='#d8d8d8',
-        BTN_ACT='#1a1a1a', BTN_ACT_T='#ffffff', BTN_ACT_H='#333333',
-        TOG_ON='#333333', TOG_OFF='#e0e0e0', TOG_ON_H='#444444',
-        GR_GRID='#cccccc', GR_TEXT='#999999',
-        CORE_LO='#e0e0e0', CORE_MED='#aaaaaa',
-        CORE_HI='#666666', CORE_MAX='#1a1a1a',
+        BG='#fafafa', CARD='#ffffff', BORDER='#ededed',
+        TEXT='#0a0a0a', TEXT_DIM='#525252', TEXT_MUTED='#a3a3a3',
+        BTN_DEF='#f5f5f5', BTN_HOVER='#ededed',
+        BTN_ACT='#0a0a0a', BTN_ACT_T='#ffffff', BTN_ACT_H='#262626',
+        TOG_ON='#0a0a0a', TOG_OFF='#ededed', TOG_ON_H='#262626',
+        GR_GRID='#ededed', GR_TEXT='#a3a3a3',
+        CORE_LO='#ededed', CORE_MED='#a3a3a3',
+        CORE_HI='#525252', CORE_MAX='#0a0a0a',
     ),
 }
 
 _cfg = load_config()
 T = THEMES.get(_cfg.get('theme', 'dark'), THEMES['dark'])
-FONT = 'JetBrains Mono'
+FONT = 'Geist Mono'
 IDEAPAD = '/sys/bus/platform/drivers/ideapad_acpi/VPC2004:00'
 RAPL = '/sys/class/powercap/intel-rapl:0'
 MEM_LEVELS = [0, 9001, 11001, 12001]
