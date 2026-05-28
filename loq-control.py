@@ -1934,6 +1934,14 @@ class LOQControl(QWidget):
         self._sensor_tiles['gpu_clk'] = self._make_metric_tile(
             'GPU CLOCK', '#bef27a', primary='-- MHz', secondary='',
             fmt=lambda v: f'{int(v)} MHz')
+        self._sensor_tiles['gpu_vram'] = self._make_metric_tile(
+            'VRAM USAGE', '#d9c1ff', show_bar=True, bar_max=100,
+            primary='-- / -- GB', secondary='--',
+            fixed_max=100, fmt=lambda v: f'{int(v)}%')
+        self._sensor_tiles['loadavg'] = self._make_metric_tile(
+            'LOAD AVG', '#82b5ff',
+            primary='-- · -- · --', secondary='1m · 5m · 15m',
+            fmt=lambda v: f'{v:.2f}')
         self._sensor_tiles['gpu_tmp'] = self._make_metric_tile(
             'GPU TEMP', '#ff6b6b', primary='--°C', secondary='peak --',
             fixed_max=105, fmt=lambda v: f'{int(v)}°C')
@@ -1952,10 +1960,12 @@ class LOQControl(QWidget):
         grid.addWidget(self._sensor_tiles['gpu_mem']['frame'], 1, 1)
         grid.addWidget(self._sensor_tiles['cpu_clk']['frame'], 2, 0)
         grid.addWidget(self._sensor_tiles['gpu_clk']['frame'], 2, 1)
-        grid.addWidget(self._sensor_tiles['cpu_tmp']['frame'], 3, 0)
-        grid.addWidget(self._sensor_tiles['gpu_tmp']['frame'], 3, 1)
-        grid.addWidget(self._sensor_tiles['cpu_fan']['frame'], 4, 0)
-        grid.addWidget(self._sensor_tiles['gpu_fan']['frame'], 4, 1)
+        grid.addWidget(self._sensor_tiles['loadavg']['frame'], 3, 0)
+        grid.addWidget(self._sensor_tiles['gpu_vram']['frame'], 3, 1)
+        grid.addWidget(self._sensor_tiles['cpu_tmp']['frame'], 4, 0)
+        grid.addWidget(self._sensor_tiles['gpu_tmp']['frame'], 4, 1)
+        grid.addWidget(self._sensor_tiles['cpu_fan']['frame'], 5, 0)
+        grid.addWidget(self._sensor_tiles['gpu_fan']['frame'], 5, 1)
         vbox.addLayout(grid)
 
         # Per-core bar chart
@@ -2782,7 +2792,8 @@ class LOQControl(QWidget):
         gpu_temp = 0
         vals = nvidia_query([
             'utilization.gpu', 'clocks.current.graphics',
-            'clocks.current.memory', 'temperature.gpu'])
+            'clocks.current.memory', 'temperature.gpu',
+            'memory.used', 'memory.total'])
         for i, (k, suf, peak_fmt) in enumerate([
                 ('gpu_util', '%', 'peak {p}%'),
                 ('gpu_clk', ' MHz', None),
@@ -2795,6 +2806,34 @@ class LOQControl(QWidget):
                     gpu_temp = v
             except (ValueError, IndexError):
                 pass
+
+        # VRAM usage (nvidia-smi reports MiB)
+        try:
+            used_mib = int(vals[4]); total_mib = int(vals[5])
+            if total_mib > 0:
+                pct = round(used_mib / total_mib * 100)
+                vram_t = self._sensor_tiles.get('gpu_vram')
+                if vram_t is not None:
+                    if vram_t['bar'] is not None:
+                        vram_t['bar'].setValue(pct)
+                    vram_t['primary'].setText(
+                        f'{used_mib / 1024:.1f} / {total_mib / 1024:.1f} GB')
+                    vram_t['secondary'].setText(f'{pct}%')
+                    vram_t['spark'].add(pct)
+        except (ValueError, IndexError, ZeroDivisionError):
+            pass
+
+        # Load average (1m / 5m / 15m)
+        try:
+            with open('/proc/loadavg') as f:
+                la = f.read().split()
+            l1, l5, l15 = float(la[0]), float(la[1]), float(la[2])
+            la_t = self._sensor_tiles.get('loadavg')
+            if la_t is not None:
+                la_t['primary'].setText(f'{l1:.2f} \u00b7 {l5:.2f} \u00b7 {l15:.2f}')
+                la_t['spark'].add(l1)
+        except Exception:
+            pass
 
         self.temp_graph.add(cpu_temp, gpu_temp)
 
