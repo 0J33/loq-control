@@ -1937,7 +1937,7 @@ class LOQControl(QWidget):
         self._sensor_tiles['gpu_vram'] = self._make_metric_tile(
             'VRAM USAGE', '#d9c1ff', show_bar=True, bar_max=100,
             primary='-- / -- GB', secondary='--',
-            fixed_max=100, fmt=lambda v: f'{int(v)}%')
+            fmt=lambda v: f'{v:.1f} GB')
         self._sensor_tiles['loadavg'] = self._make_metric_tile(
             'LOAD AVG', '#82b5ff',
             primary='-- · -- · --', secondary='1m · 5m · 15m',
@@ -2807,19 +2807,24 @@ class LOQControl(QWidget):
             except (ValueError, IndexError):
                 pass
 
-        # VRAM usage (nvidia-smi reports MiB)
+        # VRAM usage (nvidia-smi reports MiB). Spark holds GB so hover
+        # shows the absolute number, and we pin fixed_max to total VRAM
+        # so the curve doesn't look saturated when only ~1 GB is used.
         try:
             used_mib = int(vals[4]); total_mib = int(vals[5])
             if total_mib > 0:
+                used_gb = used_mib / 1024
+                total_gb = total_mib / 1024
                 pct = round(used_mib / total_mib * 100)
                 vram_t = self._sensor_tiles.get('gpu_vram')
                 if vram_t is not None:
+                    vram_t['spark'].fixed_max = total_gb
                     if vram_t['bar'] is not None:
                         vram_t['bar'].setValue(pct)
                     vram_t['primary'].setText(
-                        f'{used_mib / 1024:.1f} / {total_mib / 1024:.1f} GB')
+                        f'{used_gb:.1f} / {total_gb:.1f} GB')
                     vram_t['secondary'].setText(f'{pct}%')
-                    vram_t['spark'].add(pct)
+                    vram_t['spark'].add(used_gb)
         except (ValueError, IndexError, ZeroDivisionError):
             pass
 
