@@ -517,6 +517,22 @@ def drive_temp(dev):
     return None
 
 
+def _unescape_mount_path(s):
+    """/proc/mounts encodes spaces (and a few other chars) as backslash-
+    octal sequences (e.g. \\040 for ' '). os.statvfs needs the real path."""
+    out, i = [], 0
+    while i < len(s):
+        if s[i] == '\\' and i + 3 < len(s) and s[i+1:i+4].isdigit():
+            try:
+                out.append(chr(int(s[i+1:i+4], 8)))
+                i += 4
+                continue
+            except ValueError:
+                pass
+        out.append(s[i]); i += 1
+    return ''.join(out)
+
+
 def drive_usage(dev):
     """Best-effort (used, total) bytes for the largest partition on this drive."""
     try:
@@ -525,7 +541,7 @@ def drive_usage(dev):
             for line in f:
                 p = line.split()
                 if len(p) >= 2 and p[0].startswith(f'/dev/{dev}'):
-                    mounts.append(p[1])
+                    mounts.append(_unescape_mount_path(p[1]))
         best_total = 0; best_used = 0
         for mp in mounts:
             try:
