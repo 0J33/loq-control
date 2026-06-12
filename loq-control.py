@@ -1731,6 +1731,10 @@ class LOQControl(QWidget):
         self.sensor_timer = QTimer()
         self.sensor_timer.timeout.connect(self.refresh_sensors)
         self.sensor_timer.timeout.connect(self.refresh_battery)
+        # Performance profile can change out from under us via Fn+Q or an
+        # AC plug/unplug — a cheap sysfs read is enough to keep the UI
+        # in sync without listening on D-Bus.
+        self.sensor_timer.timeout.connect(self.refresh_profile)
         self.sensor_timer.start(3000)
 
     # ── widget helpers ────────────────────────────────────────────────
