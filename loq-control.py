@@ -16,7 +16,9 @@ from PyQt5.QtWidgets import (
     QProgressBar, QSystemTrayIcon, QMenu, QAction, QShortcut,
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
     QAbstractItemView)
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import (Qt, QTimer, pyqtSignal,
+                          QPropertyAnimation, QEasingCurve,
+                          QAbstractAnimation)
 from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen,
                          QKeySequence, QPixmap, QLinearGradient)
 
@@ -273,6 +275,40 @@ MSG_STYLE = f"""
     }}
     QMessageBox QPushButton:hover {{ background-color: {T['BTN_HOVER']}; }}
 """
+class SmoothScrollArea(QScrollArea):
+    """QScrollArea with an animated wheel scroll. The default behavior
+    jumps the scrollbar instantaneously per notch — with this many tiles
+    the dashboard feels choppy. Animating each notch over ~180 ms turns
+    discrete jumps into smooth motion."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._anim = QPropertyAnimation(self.verticalScrollBar(),
+                                        b'value', self)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.setDuration(180)
+
+    def wheelEvent(self, event):
+        bar = self.verticalScrollBar()
+        running = self._anim.state() == QAbstractAnimation.Running
+        anchor = self._anim.endValue() if running else bar.value()
+        try:
+            anchor = int(anchor)
+        except (TypeError, ValueError):
+            anchor = bar.value()
+        # Per-notch travel ≈ singleStep × 3 lines (matches Qt's own non-
+        # animated behavior; the animation just makes it smooth).
+        step = bar.singleStep() * 3
+        delta = event.angleDelta().y()
+        target = anchor - int(delta / 120 * step)
+        target = max(bar.minimum(), min(bar.maximum(), target))
+        self._anim.stop()
+        self._anim.setStartValue(bar.value())
+        self._anim.setEndValue(target)
+        self._anim.start()
+        event.accept()
+
+
 SCROLL_STYLE = f"""
     QScrollArea {{ border: none; background: {T['BG']}; }}
     QScrollBar:vertical {{
@@ -1661,11 +1697,17 @@ class LOQControl(QWidget):
     def initUI(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
+        scroll = SmoothScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet(SCROLL_STYLE)
+        # Smooth wheel scrolling: default singleStep × wheelScrollLines ≈
+        # ~60 px per notch which feels jumpy with so many tiles. Smaller
+        # step → more, smaller animated jumps.
+        scroll.verticalScrollBar().setSingleStep(12)
+        scroll.setFrameShape(QFrame.NoFrame)
         container = QWidget()
+        container.setAttribute(Qt.WA_OpaquePaintEvent, True)
         container.setStyleSheet(f'background: {T["BG"]};')
         root = QVBoxLayout(container)
         root.setSpacing(12)
