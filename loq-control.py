@@ -761,6 +761,29 @@ def battery_history_summary():
 
 # ── Custom Widgets ────────────────────────────────────────────────────
 
+class GridBackdrop(QWidget):
+    """web .grid-bg — the 18px dot-grid surface everything sits on."""
+
+    _tile = None
+
+    @classmethod
+    def tile(cls):
+        if cls._tile is None:
+            t = QPixmap(18, 18)
+            t.fill(QColor(T['BG']))
+            p = QPainter(t)
+            dot = QColor(T['TEXT'])
+            dot.setAlpha(15)  # ≈6% — radial-gradient dot opacity in css
+            p.fillRect(0, 0, 1, 1, dot)
+            p.end()
+            cls._tile = t
+        return cls._tile
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.drawTiledPixmap(self.rect(), self.tile())
+
+
 class TempGraph(QWidget):
     def __init__(self, max_pts=60):
         super().__init__()
@@ -1135,59 +1158,67 @@ class Sparkline(QWidget):
 
 
 class CpuCoreGrid(QWidget):
-    """Per-core utilization as animated vertical bars (EQ-style) with hover.
+    """Per-core utilization as the design system's .coregrid heatmap:
+    square cells, fill graded by load (idle/med/hi/max), core index
+    centred in each cell. Hover a cell for "CORE N · xx%"."""
 
-    Each core renders as a vertical column with:
-      - faint full-height background rail
-      - filled bar from the baseline to current %
-      - core index label below the bar
-      - color graded by load (low/med/high/max)
-    Hover any column to see "Core N: xx%".
-    """
+    GAP = 2
+    MIN_CELL = 18
+    MAX_CELL = 34
 
     def __init__(self, count):
         super().__init__()
         self.count = count
         self.values = [0] * count
-        self.setFixedHeight(96)
         self.setMouseTracking(True)
         self._hover_i = None
         self.setStyleSheet('background: transparent; border: none;')
+        self.setMinimumHeight(self.MIN_CELL)
 
     def set_values(self, vals):
         self.values = vals[:self.count] + [0] * (self.count - len(vals))
         self.update()
 
     def _layout(self):
-        w = self.width(); h = self.height()
-        bar_h = h - 16  # leave room for label below
-        # tight gap, fixed-width-feel bars
+        w = max(1, self.width())
         n = max(1, self.count)
-        gap = 3
-        cw = max(3, int((w - gap * (n - 1)) / n))
-        # recompute gap to evenly fill width
-        used = cw * n + gap * (n - 1)
-        slack = max(0, w - used)
-        return cw, gap, slack, bar_h
+        gap = self.GAP
+        cell = (w - gap * (n - 1)) // n
+        if cell >= self.MIN_CELL:
+            cols = n
+            cell = min(self.MAX_CELL, cell)
+        else:
+            cell = self.MIN_CELL
+            cols = max(1, (w + gap) // (cell + gap))
+        rows = (n + cols - 1) // cols
+        return cell, gap, cols, rows
 
-    def _index_at_x(self, x):
-        cw, gap, slack, _ = self._layout()
-        # distribute slack as a left offset so bars look centred
-        off = slack // 2
-        if x < off:
+    def _sync_height(self):
+        cell, gap, cols, rows = self._layout()
+        h = rows * cell + (rows - 1) * gap
+        if self.height() != h:
+            self.setFixedHeight(h)
+
+    def resizeEvent(self, ev):
+        self._sync_height()
+        super().resizeEvent(ev)
+
+    def _cell_rect(self, i):
+        cell, gap, cols, _ = self._layout()
+        r, c = divmod(i, cols)
+        return c * (cell + gap), r * (cell + gap), cell, cell
+
+    def _index_at(self, pos):
+        cell, gap, cols, _ = self._layout()
+        step = cell + gap
+        c, r = pos.x() // step, pos.y() // step
+        if c >= cols or pos.x() - c * step > cell or pos.y() - r * step > cell:
             return None
-        rel = x - off
-        step = cw + gap
-        i = rel // step if step else 0
-        if i < 0 or i >= self.count:
-            return None
-        # ensure click is inside a bar, not in the gap
-        if rel - i * step > cw:
-            return None
-        return int(i)
+        i = int(r * cols + c)
+        return i if 0 <= i < self.count else None
 
     def mouseMoveEvent(self, ev):
-        self._hover_i = self._index_at_x(ev.pos().x())
+        self._hover_i = self._index_at(ev.pos())
         self.update()
 
     def leaveEvent(self, ev):
@@ -1196,66 +1227,60 @@ class CpuCoreGrid(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-        cw, gap, slack, bar_h = self._layout()
-        off = slack // 2
-        base_y = bar_h
-        # baseline
-        p.setPen(QPen(QColor(T['GR_GRID']), 1))
-        p.drawLine(0, base_y + 1, w, base_y + 1)
-        # bars
+        cell, gap, cols, rows = self._layout()
+        p.setFont(QFont(FONT_HUD, max(6, min(8, cell // 3))))
+        fm = p.fontMetrics()
         for i, v in enumerate(self.values):
             v = max(0, min(100, v))
-            x = off + i * (cw + gap)
-            # background rail
-            rail = QColor(T['BORDER']); rail.setAlpha(120)
-            p.fillRect(x, 0, cw, bar_h, rail)
-            # bar fill height
-            bh = int(bar_h * v / 100)
-            if bh > 0:
-                color = (T['CORE_LO'] if v < 30 else T['CORE_MED'] if v < 60
-                         else T['CORE_HI'] if v < 85 else T['CORE_MAX'])
-                p.fillRect(x, base_y - bh, cw, bh, QColor(color))
-        # core index labels (every 2 cores if cramped, else every 1)
-        p.setFont(QFont(FONT_HUD, 6))
-        p.setPen(QPen(QColor(T['GR_TEXT'])))
-        step = 1 if cw >= 14 else 2 if cw >= 8 else 4
-        for i in range(0, self.count, step):
-            x = off + i * (cw + gap)
-            fm = p.fontMetrics()
+            x, y, cw, ch = self._cell_rect(i)
+            # .coregrid thresholds: idle / med / hi / max
+            if v > 88:
+                bg, fg = T['CORE_MAX'], '#000000'
+            elif v > 60:
+                bg, fg = T['CORE_HI'], '#000000'
+            elif v > 25:
+                bg, fg = T['CORE_MED'], '#000000'
+            else:
+                bg, fg = T['CORE_LO'], T['GR_TEXT']
+            p.fillRect(x, y, cw, ch, QColor(bg))
+            if v > 88:
+                # stand-in for the web box-shadow glow on .max cells
+                glow = QColor(T['CORE_MAX'])
+                glow.setAlpha(110)
+                p.setPen(QPen(glow, 1))
+                p.setBrush(Qt.NoBrush)
+                p.drawRect(x - 1, y - 1, cw + 1, ch + 1)
             text = str(i)
-            tw = fm.horizontalAdvance(text)
-            p.drawText(x + (cw - tw) // 2, h - 3, text)
-        # hover tooltip
+            p.setPen(QPen(QColor(fg)))
+            p.drawText(x + (cw - fm.horizontalAdvance(text)) // 2,
+                       y + (ch + fm.ascent()) // 2 - 1, text)
+        # hover: outline + tooltip
         if self._hover_i is None or self._hover_i >= len(self.values):
             return
         i = self._hover_i
-        x = off + i * (cw + gap)
-        # highlight bar
-        hi = QColor(T['TEXT']); hi.setAlpha(70)
-        p.setPen(QPen(hi, 1))
-        p.setBrush(Qt.NoBrush)
-        p.drawRect(x - 1, 0, cw + 1, bar_h)
-        # label
-        text = f'Core {i} · {self.values[i]}%'
+        x, y, cw, ch = self._cell_rect(i)
+        hi = QColor(T['TEXT']); hi.setAlpha(160)
+        p.setPen(QPen(hi, 1)); p.setBrush(Qt.NoBrush)
+        p.drawRect(x, y, cw - 1, ch - 1)
+        text = f'CORE {i} · {self.values[i]}%'
         p.setFont(QFont(FONT, 8, QFont.Bold))
-        fm = p.fontMetrics()
-        tw = fm.horizontalAdvance(text) + 10
-        th = fm.height() + 4
+        fm2 = p.fontMetrics()
+        tw = fm2.horizontalAdvance(text) + 10
+        th = fm2.height() + 4
         lx = x + cw + 6
-        if lx + tw > w: lx = x - tw - 6
-        ly = max(0, base_y - bar_h)
-        bg = QColor(T['CARD']); bg.setAlpha(235)
-        p.setPen(QPen(QColor(T['BORDER']), 1)); p.setBrush(bg)
-        p.drawRoundedRect(lx, ly, tw, th, 0, 0)
+        if lx + tw > self.width():
+            lx = max(0, x - tw - 6)
+        ly = min(max(0, y), max(0, self.height() - th))
+        bg2 = QColor(T['CARD']); bg2.setAlpha(235)
+        p.setPen(QPen(QColor(T['BORDER']), 1)); p.setBrush(bg2)
+        p.drawRect(lx, ly, tw, th)
         p.setPen(QPen(QColor(T['TEXT'])))
-        p.drawText(lx + 5, ly + fm.ascent() + 2, text)
+        p.drawText(lx + 5, ly + fm2.ascent() + 2, text)
 
 
 # ── Process Manager Window ────────────────────────────────────────────
 
-class ProcessManagerWindow(QWidget):
+class ProcessManagerWindow(GridBackdrop):
     """Full system process manager with sortable table, search, and kill."""
 
     _COLS = ['PID', 'Name', 'User', 'CPU %', 'MEM %', 'Memory', 'Status',
@@ -1271,7 +1296,7 @@ class ProcessManagerWindow(QWidget):
         self.setWindowTitle('Process Manager / LOQ Control')
         self.setWindowIcon(_build_icon())
         self.setMinimumSize(960, 640)
-        self.setStyleSheet(f'background-color: {T["BG"]};')
+        # bg comes from GridBackdrop.paintEvent (dot grid)
         self._prev_times = {}
         self._n_cpus = os.cpu_count() or 1
         self._prev_total = self._read_cpu_total()
@@ -1693,13 +1718,14 @@ class LOQControl(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet(SCROLL_STYLE)
-        container = QWidget()
-        container.setStyleSheet(f'background: {T["BG"]};')
+        container = GridBackdrop()
         root = QVBoxLayout(container)
         root.setSpacing(12)
         root.setContentsMargins(24, 24, 24, 24)
 
-        title = QLabel('loq control')
+        # web .nav-logo: lowercase major-mono brand with accent dot
+        title = QLabel(
+            f'loq<span style="color: {T["ACCENT"]};">.</span>control')
         title.setFont(QFont(FONT_DISPLAY, 18))
         title.setStyleSheet(
             f'color: {T["TEXT"]}; background: transparent; letter-spacing: 3px;')
@@ -1731,17 +1757,28 @@ class LOQControl(QWidget):
         root.addLayout(g)
         root.addStretch()
 
-        footer = QLabel(
-            f'Made by ojee  \u2022  '
-            f'<a href="https://ojee.net" style="color: {T["TEXT_DIM"]};">'
-            f'ojee.net</a>')
-        footer.setFont(QFont(FONT, 8))
-        footer.setAlignment(Qt.AlignCenter)
-        footer.setOpenExternalLinks(True)
-        footer.setStyleSheet(
-            f'color: {T["TEXT_MUTED"]}; background: transparent; '
-            f'padding: 12px 0 0 0;')
-        root.addWidget(footer)
+        # web footer: hairline on top, meta left, accent label link right
+        fsep = QFrame()
+        fsep.setFixedHeight(1)
+        fsep.setStyleSheet(f'background: {T["BORDER"]}; border: none;')
+        root.addSpacing(12)
+        root.addWidget(fsep)
+        frow = QHBoxLayout()
+        frow.setContentsMargins(0, 10, 0, 0)
+        made = QLabel('MADE BY OJEE')
+        made.setFont(mkfont(8, ls=1.5, family=FONT_HUD))
+        made.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; background: transparent;')
+        link = QLabel(
+            f'<a href="https://ojee.net" style="color: {T["ACCENT"]}; '
+            f'text-decoration: none;">OJEE.NET</a>')
+        link.setFont(mkfont(8, bold=True, ls=2.0))
+        link.setOpenExternalLinks(True)
+        link.setStyleSheet('background: transparent;')
+        frow.addWidget(made)
+        frow.addStretch()
+        frow.addWidget(link)
+        root.addLayout(frow)
         disclaimer = QLabel(
             '\u201cLOQ\u201d and the LOQ logo are trademarks of Lenovo. '
             'Not affiliated with or endorsed by Lenovo.')
