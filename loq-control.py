@@ -1631,21 +1631,32 @@ class LOQControl(QWidget):
         pl = self.cfg.get('oc_power_limit', 0)
         gc = self.cfg.get('oc_gpu_clock', 0)
         mc = self.cfg.get('oc_mem_clock_idx', 0)
+        # Restore the slider positions silently (blockSignals avoids
+        # re-applying the OC), then re-evaluate each AUTO chip against
+        # the freshly-loaded value — otherwise the chip stays lit from
+        # construction time when the slider sat at its auto default.
+        def _sync_auto(btn, slider):
+            if btn is not None and hasattr(btn, '_update_active'):
+                btn._update_active(slider.value())
+
         if pl > 0:
             self.pl_slider.blockSignals(True)
             self.pl_slider.setValue(pl)
             self.pl_slider.blockSignals(False)
             self.pl_val.setText(f'{pl} W')
+        _sync_auto(getattr(self, 'pl_auto_btn', None), self.pl_slider)
         if gc >= GPU_CLOCK_MIN:
             self.gc_slider.blockSignals(True)
             self.gc_slider.setValue(gc)
             self.gc_slider.blockSignals(False)
             self.gc_val.setText(f'{gc} MHz')
+        _sync_auto(getattr(self, 'gc_auto_btn', None), self.gc_slider)
         if mc > 0:
             self.mc_slider.blockSignals(True)
             self.mc_slider.setValue(mc)
             self.mc_slider.blockSignals(False)
             self.mc_val.setText(MEM_LABELS[mc])
+        _sync_auto(getattr(self, 'mc_auto_btn', None), self.mc_slider)
 
     def initUI(self):
         outer = QVBoxLayout(self)
@@ -2226,7 +2237,7 @@ class LOQControl(QWidget):
         vbox.addWidget(pl_panel)
 
         # \u2500\u2500 GPU Clock Min \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        gc_panel, self.gc_slider, self.gc_val, _ = self._oc_panel(
+        gc_panel, self.gc_slider, self.gc_val, self.gc_auto_btn = self._oc_panel(
             'GPU CLOCK MIN', 0, 3090, 0,
             value_fmt=lambda v: ('Auto' if v < GPU_CLOCK_MIN
                                  else f'{int(v)} MHz'),
@@ -2242,7 +2253,7 @@ class LOQControl(QWidget):
         vbox.addWidget(gc_panel)
 
         # \u2500\u2500 Memory Clock \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        mc_panel, self.mc_slider, self.mc_val, _ = self._oc_panel(
+        mc_panel, self.mc_slider, self.mc_val, self.mc_auto_btn = self._oc_panel(
             'MEMORY CLOCK', 0, 3, 0,
             value_fmt=lambda v: MEM_LABELS[int(v)],
             snap=1, tick_interval=1, major_tick_every=1,
