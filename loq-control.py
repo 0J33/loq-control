@@ -16,9 +16,7 @@ from PyQt5.QtWidgets import (
     QProgressBar, QSystemTrayIcon, QMenu, QAction, QShortcut,
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
     QAbstractItemView)
-from PyQt5.QtCore import (Qt, QTimer, pyqtSignal,
-                          QPropertyAnimation, QEasingCurve,
-                          QAbstractAnimation)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen,
                          QKeySequence, QPixmap, QLinearGradient)
 
@@ -275,40 +273,6 @@ MSG_STYLE = f"""
     }}
     QMessageBox QPushButton:hover {{ background-color: {T['BTN_HOVER']}; }}
 """
-class SmoothScrollArea(QScrollArea):
-    """QScrollArea with an animated wheel scroll. The default behavior
-    jumps the scrollbar instantaneously per notch — with this many tiles
-    the dashboard feels choppy. Animating each notch over ~180 ms turns
-    discrete jumps into smooth motion."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._anim = QPropertyAnimation(self.verticalScrollBar(),
-                                        b'value', self)
-        self._anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._anim.setDuration(180)
-
-    def wheelEvent(self, event):
-        bar = self.verticalScrollBar()
-        running = self._anim.state() == QAbstractAnimation.Running
-        anchor = self._anim.endValue() if running else bar.value()
-        try:
-            anchor = int(anchor)
-        except (TypeError, ValueError):
-            anchor = bar.value()
-        # Per-notch travel ≈ singleStep × 3 lines (matches Qt's own non-
-        # animated behavior; the animation just makes it smooth).
-        step = bar.singleStep() * 3
-        delta = event.angleDelta().y()
-        target = anchor - int(delta / 120 * step)
-        target = max(bar.minimum(), min(bar.maximum(), target))
-        self._anim.stop()
-        self._anim.setStartValue(bar.value())
-        self._anim.setEndValue(target)
-        self._anim.start()
-        event.accept()
-
-
 SCROLL_STYLE = f"""
     QScrollArea {{ border: none; background: {T['BG']}; }}
     QScrollBar:vertical {{
@@ -1697,17 +1661,11 @@ class LOQControl(QWidget):
     def initUI(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = SmoothScrollArea()
+        scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet(SCROLL_STYLE)
-        # Smooth wheel scrolling: default singleStep × wheelScrollLines ≈
-        # ~60 px per notch which feels jumpy with so many tiles. Smaller
-        # step → more, smaller animated jumps.
-        scroll.verticalScrollBar().setSingleStep(12)
-        scroll.setFrameShape(QFrame.NoFrame)
         container = QWidget()
-        container.setAttribute(Qt.WA_OpaquePaintEvent, True)
         container.setStyleSheet(f'background: {T["BG"]};')
         root = QVBoxLayout(container)
         root.setSpacing(12)
@@ -1820,6 +1778,12 @@ class LOQControl(QWidget):
         return l
 
     def _set_btn_active(self, b, active):
+        # Re-applying a stylesheet forces Qt to re-parse and re-polish the
+        # widget, which can stall the UI thread mid-scroll. Skip the work
+        # when nothing actually changed (refreshes call this every tick).
+        if getattr(b, '_active_state', None) is active:
+            return
+        b._active_state = active
         if active:
             b.setStyleSheet(f"""
                 QPushButton {{
@@ -1852,6 +1816,11 @@ class LOQControl(QWidget):
 
     def _style_switch(self, b, on):
         b.setText('ON' if on else 'OFF')
+        # Cache the last applied state — refresh handlers call this every
+        # tick; re-applying the stylesheet stalls the UI thread.
+        if getattr(b, '_switch_state', None) is on:
+            return
+        b._switch_state = on
         if on:
             b.setStyleSheet(f"""
                 QPushButton {{
@@ -2960,19 +2929,28 @@ class LOQControl(QWidget):
             label_color = '#ffd700'
         else:
             label_color = T['TEXT_MUTED']
-        tile['label'].setStyleSheet(
-            f'color: {label_color}; border: none; background: transparent; '
-            f'letter-spacing: 1.5px;')
+        # Cache the last applied color/secondary-style so we only re-set
+        # the stylesheet when it actually changes — restyling forces Qt
+        # to re-parse and re-polish, which stalls scroll on each tick.
+        if tile.get('_last_label_color') != label_color:
+            tile['label'].setStyleSheet(
+                f'color: {label_color}; border: none; background: transparent; '
+                f'letter-spacing: 1.5px;')
+            tile['_last_label_color'] = label_color
         if throttle_text:
             tile['secondary'].setText(f'THROTTLED · {throttle_text}')
-            tile['secondary'].setStyleSheet(
-                'color: #ff0000; border: none; background: transparent;')
+            if tile.get('_last_sec_state') != 'throttle':
+                tile['secondary'].setStyleSheet(
+                    'color: #ff0000; border: none; background: transparent;')
+                tile['_last_sec_state'] = 'throttle'
         else:
             peak = int(tile['peak']) if tile['peak'] else 0
             tile['secondary'].setText(
                 f'peak {peak}°C' if peak else 'peak --')
-            tile['secondary'].setStyleSheet(
-                f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
+            if tile.get('_last_sec_state') != 'peak':
+                tile['secondary'].setStyleSheet(
+                    f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
+                tile['_last_sec_state'] = 'peak'
 
     def _set_sensor(self, key, value, text, peak_fmt=None):
         tile = self._sensor_tiles.get(key)
@@ -3251,10 +3229,12 @@ class LOQControl(QWidget):
             'Full': '#44bbaa', 'Not charging': '#cc99ff',
         }.get(status, T['TEXT_MUTED'])
         self.batt_status_lbl.setText(names.get(status, status.upper() or '—'))
-        self.batt_status_lbl.setStyleSheet(
-            f'color: {status_color}; border: 1px solid {status_color}; '
-            f'background: transparent; letter-spacing: 1.5px; '
-            f'padding: 2px 8px; border-radius: 0px;')
+        if getattr(self, '_last_status_color', None) != status_color:
+            self.batt_status_lbl.setStyleSheet(
+                f'color: {status_color}; border: 1px solid {status_color}; '
+                f'background: transparent; letter-spacing: 1.5px; '
+                f'padding: 2px 8px; border-radius: 0px;')
+            self._last_status_color = status_color
 
         # ── Charge ──────────────────────────────────────────────────
         try:
