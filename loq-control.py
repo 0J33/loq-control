@@ -190,6 +190,16 @@ _cfg = load_config()
 T = THEMES.get(_cfg.get('theme', 'dark'), THEMES['dark'])
 FONT = 'Geist Mono'
 FONT_DISPLAY = 'Major Mono Display'  # unicase pixel-ish display face
+FONT_HUD = 'Departure Mono'          # tiny instrument labels (web --hud)
+
+
+def mkfont(size, bold=False, ls=0.0, family=None):
+    """Design-system font: Qt stylesheets ignore letter-spacing, so
+    tracked uppercase labels (web .label/.meta) need it on the QFont."""
+    f = QFont(family or FONT, size, QFont.Bold if bold else QFont.Normal)
+    if ls:
+        f.setLetterSpacing(QFont.AbsoluteSpacing, ls)
+    return f
 IDEAPAD = '/sys/bus/platform/drivers/ideapad_acpi/VPC2004:00'
 RAPL = '/sys/class/powercap/intel-rapl:0'
 MEM_LEVELS = [0, 9001, 11001, 12001]
@@ -271,7 +281,15 @@ MSG_STYLE = f"""
         border: 1px solid {T['BORDER']}; border-radius: 0px;
         padding: 6px 16px; font-family: '{FONT}'; min-width: 60px;
     }}
-    QMessageBox QPushButton:hover {{ background-color: {T['BTN_HOVER']}; }}
+    QMessageBox QPushButton:hover {{
+        background-color: {T['BTN_HOVER']}; color: {T['ACCENT']};
+        border-color: {T['ACCENT']};
+    }}
+    QToolTip {{
+        background-color: #000000; color: {T['ACCENT']};
+        border: 1px solid {T['ACCENT']}; border-radius: 0px;
+        font-family: '{FONT}'; font-size: 8pt; padding: 4px 8px;
+    }}
 """
 SCROLL_STYLE = f"""
     QScrollArea {{ border: none; background: {T['BG']}; }}
@@ -279,7 +297,7 @@ SCROLL_STYLE = f"""
         background: {T['BG']}; width: 6px; border: none;
     }}
     QScrollBar::handle:vertical {{
-        background: {T['BORDER']}; border-radius: 0px; min-height: 30px;
+        background: {T['ACCENT']}; border-radius: 0px; min-height: 30px;
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0; background: none;
@@ -781,7 +799,7 @@ class TempGraph(QWidget):
             p.setPen(QPen(grid, 1, Qt.DotLine))
             p.drawLine(ml, y, w - 5, y)
             p.setPen(QPen(QColor(T['GR_TEXT']), 1))
-            p.setFont(QFont(FONT, 7))
+            p.setFont(QFont(FONT_HUD, 7))
             p.drawText(0, y + 4, f'{t}\u00b0')
         # vertical time gridlines
         grid = QColor(T['GR_GRID']); grid.setAlpha(60)
@@ -807,7 +825,7 @@ class TempGraph(QWidget):
 
         draw(cpu_pts, '#00ffff')
         draw(gpu_pts, '#ffd700')
-        p.setFont(QFont(FONT, 7, QFont.Bold))
+        p.setFont(QFont(FONT_HUD, 7))
         p.setPen(QPen(QColor('#00ffff'), 1))
         p.drawText(ml + 5, h - 4, 'CPU')
         p.setPen(QPen(QColor('#ffd700'), 1))
@@ -937,7 +955,7 @@ class SliderTicks(QWidget):
         x_min, x_max = self._track_extents()
         lo, hi = self.slider.minimum(), self.slider.maximum()
         rng = hi - lo if hi > lo else 1
-        p.setFont(QFont(FONT, 7))
+        p.setFont(QFont(FONT_HUD, 7))
         fm = p.fontMetrics()
         for value, label in self.ticks:
             v = max(lo, min(hi, value))
@@ -1200,7 +1218,7 @@ class CpuCoreGrid(QWidget):
                          else T['CORE_HI'] if v < 85 else T['CORE_MAX'])
                 p.fillRect(x, base_y - bh, cw, bh, QColor(color))
         # core index labels (every 2 cores if cramped, else every 1)
-        p.setFont(QFont(FONT, 6))
+        p.setFont(QFont(FONT_HUD, 6))
         p.setPen(QPen(QColor(T['GR_TEXT'])))
         step = 1 if cw >= 14 else 2 if cw >= 8 else 4
         for i in range(0, self.count, step):
@@ -1306,35 +1324,45 @@ class ProcessManagerWindow(QWidget):
                 border: 1px solid {T['BORDER']}; border-radius: 0px;
                 padding: 8px 12px;
             }}
-            QLineEdit:focus {{ border-color: {T['TEXT_DIM']}; }}
+            QLineEdit:focus {{
+                border-color: {T['ACCENT']}; background: {T['BTN_HOVER']};
+            }}
         """)
         self._search.textChanged.connect(self._apply_filter)
         tb.addWidget(self._search)
 
-        kill_btn = QPushButton('End Process')
-        kill_btn.setFont(QFont(FONT, 9, QFont.Bold))
+        kill_btn = QPushButton('END PROCESS')
+        kill_btn.setFont(mkfont(9, bold=True, ls=1.5))
         kill_btn.setCursor(Qt.PointingHandCursor)
         kill_btn.setMinimumHeight(36)
+        # ghost-danger (web .btn--danger): red ink, faint red border;
+        # hover inverts to red fill / black text
         kill_btn.setStyleSheet(f"""
             QPushButton {{
-                background: #cc3333; color: #ffffff;
-                border: none; border-radius: 0px; padding: 8px 16px;
+                background: transparent; color: #ff0000;
+                border: 1px solid #620d0a; border-radius: 0px;
+                padding: 8px 16px;
             }}
-            QPushButton:hover {{ background: #aa2222; }}
+            QPushButton:hover {{
+                background: #ff0000; color: #000000;
+                border-color: #ff0000;
+            }}
         """)
         kill_btn.clicked.connect(self._kill_selected)
         tb.addWidget(kill_btn)
 
-        fkill_btn = QPushButton('Force Kill')
-        fkill_btn.setFont(QFont(FONT, 9, QFont.Bold))
+        fkill_btn = QPushButton('FORCE KILL')
+        fkill_btn.setFont(mkfont(9, bold=True, ls=1.5))
         fkill_btn.setCursor(Qt.PointingHandCursor)
         fkill_btn.setMinimumHeight(36)
+        # filled-danger: the destructive primary, red fill / black text
         fkill_btn.setStyleSheet(f"""
             QPushButton {{
-                background: #881111; color: #ffffff;
-                border: none; border-radius: 0px; padding: 8px 16px;
+                background: #ff0000; color: #000000;
+                border: 1px solid #ff0000; border-radius: 0px;
+                padding: 8px 16px;
             }}
-            QPushButton:hover {{ background: #660000; }}
+            QPushButton:hover {{ background: #ff5050; border-color: #ff5050; }}
         """)
         fkill_btn.clicked.connect(lambda: self._kill_selected(force=True))
         tb.addWidget(fkill_btn)
@@ -1376,7 +1404,7 @@ class ProcessManagerWindow(QWidget):
             }}
             QTableWidget::item {{ padding: 2px 8px; border: none; }}
             QTableWidget::item:selected {{
-                background-color: {T['BTN_HOVER']}; color: {T['TEXT']};
+                background-color: {T['ACCENT']}; color: {T['BTN_ACT_T']};
             }}
             QHeaderView::section {{
                 background-color: {T['CARD']}; color: {T['TEXT_DIM']};
@@ -1389,7 +1417,7 @@ class ProcessManagerWindow(QWidget):
                 background: {T['CARD']}; width: 6px; border: none;
             }}
             QScrollBar::handle:vertical {{
-                background: {T['BORDER']}; border-radius: 0px;
+                background: {T['ACCENT']}; border-radius: 0px;
                 min-height: 30px;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
@@ -1677,7 +1705,7 @@ class LOQControl(QWidget):
             f'color: {T["TEXT"]}; background: transparent; letter-spacing: 3px;')
         root.addWidget(title)
         sub = QLabel('LENOVO LOQ // SYSTEM CONTROLS')
-        sub.setFont(QFont(FONT, 9))
+        sub.setFont(mkfont(9, ls=2.0, family=FONT_HUD))
         sub.setStyleSheet(
             f'color: {T["TEXT_MUTED"]}; background: transparent; '
             f'margin-bottom: 4px; letter-spacing: 2px;')
@@ -1740,9 +1768,11 @@ class LOQControl(QWidget):
     # ── widget helpers ────────────────────────────────────────────────
 
     def _btn(self, text, fs=10):
-        b = QPushButton(text)
+        # ghost button (web .btn--ghost): uppercase tracked label,
+        # hover = accent ink + accent border + cyan-tint fill
+        b = QPushButton(text.upper())
         b.setMinimumHeight(36)
-        b.setFont(QFont(FONT, fs, QFont.Bold))
+        b.setFont(mkfont(fs, bold=True, ls=1.2))
         b.setCursor(Qt.PointingHandCursor)
         b.setStyleSheet(f"""
             QPushButton {{
@@ -1751,21 +1781,23 @@ class LOQControl(QWidget):
                 padding: 7px 6px;
             }}
             QPushButton:hover {{
-                background-color: {T['BTN_HOVER']}; color: {T['TEXT']};
+                background-color: {T['BTN_HOVER']}; color: {T['ACCENT']};
+                border-color: {T['ACCENT']};
             }}
         """)
         return b
 
     def _header(self, text):
-        l = QLabel(text)
-        l.setFont(QFont(FONT, 11, QFont.Bold))
+        # web .h2: uppercase 900-weight
+        l = QLabel(text.upper())
+        l.setFont(mkfont(11, bold=True, ls=1.2))
         l.setStyleSheet(
             f'color: {T["TEXT"]}; border: none; background: transparent;')
         return l
 
     def _sub_header(self, text):
-        l = QLabel(text)
-        l.setFont(QFont(FONT, 10, QFont.Bold))
+        l = QLabel(text.upper())
+        l.setFont(mkfont(10, bold=True, ls=1.0))
         l.setStyleSheet(
             f'color: {T["TEXT"]}; border: none; background: transparent;')
         return l
@@ -1803,14 +1835,15 @@ class LOQControl(QWidget):
                     padding: 7px 6px;
                 }}
                 QPushButton:hover {{
-                    background-color: {T['BTN_HOVER']}; color: {T['TEXT']};
+                    background-color: {T['BTN_HOVER']}; color: {T['ACCENT']};
+                    border-color: {T['ACCENT']};
                 }}
             """)
 
     def _switch(self, w=70):
         b = QPushButton('OFF')
         b.setFixedSize(w, 30)
-        b.setFont(QFont(FONT, 9, QFont.Bold))
+        b.setFont(mkfont(9, bold=True, ls=1.5))
         b.setCursor(Qt.PointingHandCursor)
         return b
 
@@ -1903,8 +1936,9 @@ class LOQControl(QWidget):
         return row
 
     def _toggle_row(self, name):
+        # web .row: uppercase 900-weight tracked label
         row = QHBoxLayout(); row.setSpacing(12)
-        l = QLabel(name); l.setFont(QFont(FONT, 9))
+        l = QLabel(name.upper()); l.setFont(mkfont(9, bold=True, ls=1.0))
         l.setStyleSheet(
             f'color: {T["TEXT_DIM"]}; border: none; background: transparent;')
         row.addWidget(l); row.addStretch()
@@ -1913,7 +1947,7 @@ class LOQControl(QWidget):
 
     def _val_row(self, name):
         row = QHBoxLayout(); row.setSpacing(12)
-        l = QLabel(name); l.setFont(QFont(FONT, 9))
+        l = QLabel(name.upper()); l.setFont(mkfont(9, bold=True, ls=1.0))
         l.setStyleSheet(
             f'color: {T["TEXT_DIM"]}; border: none; background: transparent;')
         l.setFixedWidth(150); row.addWidget(l); row.addStretch()
@@ -2017,7 +2051,7 @@ class LOQControl(QWidget):
 
         # Per-core bar chart
         cl = QLabel('PER-CORE UTILIZATION')
-        cl.setFont(QFont(FONT, 8, QFont.Bold))
+        cl.setFont(mkfont(8, ls=1.5, family=FONT_HUD))
         cl.setStyleSheet(
             f'color: {T["TEXT_MUTED"]}; border: none; background: transparent; '
             f'letter-spacing: 1.5px; margin-top: 4px;')
@@ -2137,8 +2171,8 @@ class LOQControl(QWidget):
 
         cr = QHBoxLayout(); cr.setSpacing(12)
         ct = QVBoxLayout(); ct.setSpacing(2)
-        t = QLabel('Conservation Mode')
-        t.setFont(QFont(FONT, 10, QFont.Bold))
+        t = QLabel('CONSERVATION MODE')
+        t.setFont(mkfont(10, bold=True, ls=1.0))
         t.setStyleSheet(
             f'color: {T["TEXT"]}; border: none; background: transparent;')
         d = QLabel('Keeps battery between 75-80% to extend lifespan')
@@ -2225,7 +2259,7 @@ class LOQControl(QWidget):
         hdr.addWidget(self._header('GPU Overclock'))
         hdr.addStretch()
         note = QLabel('// resets on reboot')
-        note.setFont(QFont(FONT, 8))
+        note.setFont(mkfont(8, ls=1.0, family=FONT_HUD))
         note.setStyleSheet(
             f'color: {T["TEXT_MUTED"]}; border: none; '
             f'background: transparent; letter-spacing: 1px;')
@@ -2673,14 +2707,15 @@ class LOQControl(QWidget):
                           primary='--', secondary='', fixed_max=None,
                           fmt=None, color2=None, label1='', label2=''):
         frame = QFrame()
+        # surfaces lighten as they stack (web: .panel tint over --bg)
         frame.setStyleSheet(
-            f'QFrame {{ background: {T["BG"]}; '
+            f'QFrame {{ background: {T["BTN_DEF"]}; '
             f'border: 1px solid {T["BORDER"]}; border-radius: 0px; }}')
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(12, 10, 12, 10); lay.setSpacing(6)
         top = QHBoxLayout(); top.setSpacing(8)
         lbl = QLabel(label)
-        lbl.setFont(QFont(FONT, 8, QFont.Bold))
+        lbl.setFont(mkfont(8, ls=1.5, family=FONT_HUD))
         lbl.setStyleSheet(
             f'color: {T["TEXT_MUTED"]}; border: none; background: transparent; '
             f'letter-spacing: 1.5px;')
