@@ -1,0 +1,1442 @@
+/* ============================================================
+   OJEE-UI v1.0.0 — terminal-instrument-cluster design system
+   cyan-on-near-black · all-mono · zero-radius · single accent
+
+   Drop this one file into any project and use the classes below.
+   To rebrand, load a theme file AFTER this one — it only needs to
+   redefine tokens, never rules:
+
+       <link rel="stylesheet" href="ojee-ui.css">
+       <link rel="stylesheet" href="themes/my-brand.css">
+
+   Every value in the rules below resolves to a token. If you find
+   a literal colour outside the token block, that is a bug — it
+   means that value cannot be rebranded.
+   ============================================================ */
+
+/* ============================================================
+   TOKENS
+   The default theme (ojee) is inlined here so the file works
+   standalone. themes/_template.css documents the full contract.
+   ============================================================ */
+:root {
+  /* ---- surfaces ------------------------------------------------
+     bg-0/bg-1 are the two stops of the root backdrop gradient.
+     bg is the nominal page colour used for contrast maths.
+     bg-2 lifts modals, toasts and select menus off the page. */
+  --bg-0:    #06060a;
+  --bg-1:    #0a0a10;
+  --bg:      #08080e;
+  --bg-2:    #0e0e15;
+
+  /* Translucent fills. panel sits on content; tint-* are the
+     neutral lifts used by chrome (title bars, table headers). */
+  --panel:   rgba(255, 255, 255, 0.02);
+  --tint-1:  rgba(216, 222, 236, 0.02);
+  --tint-2:  rgba(216, 222, 236, 0.03);
+  --tint-3:  rgba(216, 222, 236, 0.18);
+  /* Dot of the .grid-bg drafting surface. A token because a light
+     theme needs a DARK dot — hardcoding the pale one made the grid
+     vanish entirely on paper.css. */
+  --dot-grid: rgba(216, 222, 236, 0.06);
+
+  /* Chrome backgrounds — same hue as --bg at four opacities, so a
+     blurred bar over scrolling content still reads as one surface. */
+  --chrome:    rgba(8, 8, 14, 0.90);
+  --chrome-2:  rgba(8, 8, 14, 0.92);
+  --chrome-3:  rgba(8, 8, 14, 0.96);
+  --chrome-4:  rgba(8, 8, 14, 0.75);
+  --scrim:     rgba(0, 0, 0, 0.72);
+
+  /* ---- ink -----------------------------------------------------
+     Measured against --bg: ink 15.99:1, ink-2 8.11:1, dim 5.38:1.
+     All three clear the 4.5:1 AA floor, so --dim is safe for the
+     .label / .meta micro-type it is used for. */
+  --ink:     #e8e6df;
+  --ink-2:   #a8a59c;
+  --dim:     #8a8478;
+  --ink-hi:  #ffffff;
+  /* Text placed ON the accent (buttons, checked boxes, hot cells). */
+  --on-accent: #000000;
+
+  /* ---- lines ---------------------------------------------------
+     line / line-2 are DECORATIVE rules — hairlines, table borders,
+     panel edges. They are deliberately near-invisible (1.19:1 and
+     1.08:1) because the layout, not the border, does the work.
+
+     line-strong is for CONTROL BOUNDARIES — anything whose edge is
+     what tells you it is interactive: inputs, selects, toggles,
+     checkboxes, segmented controls. It measures 3.34:1 on --bg,
+     3.22:1 on --bg-2 and 3.24:1 on --panel, clearing the WCAG
+     1.4.11 non-text floor of 3:1 on every surface in the system.
+     Do not swap these two: making every hairline 3:1 turns the
+     drafting aesthetic into a spreadsheet. */
+  --line:        rgba(216, 222, 236, 0.10);
+  --line-2:      #131319;
+  --line-strong: #606370;
+  --line-hover:  #2c2f38;
+
+  /* ---- accent --------------------------------------------------- */
+  --accent:    #00ffff;
+  --accent-08: rgba(0, 255, 255, 0.08);
+  --accent-03: rgba(0, 255, 255, 0.03);
+
+  /* Accent glows, as tokens so a theme with a non-cyan accent does
+     not keep cyan halos. */
+  --glow:        rgba(0, 255, 255, 0.50);
+  --glow-soft:   rgba(0, 255, 255, 0.40);
+  --glow-mid:    rgba(0, 255, 255, 0.15);
+  --glow-faint:  rgba(0, 255, 255, 0.08);
+  --glow-strong: rgba(0, 255, 255, 0.55);
+
+  /* ---- status --------------------------------------------------- */
+  --ok:      #88aa44;
+  --warn:    #ffd700;
+  --err:     #ff0000;
+  --info:    #88ccff;
+  --err-line: rgba(255, 0, 0, 0.35);
+  --err-wash: rgba(255, 0, 0, 0.03);
+  --glow-ok:   rgba(136, 170, 68, 0.40);
+  --glow-warn: rgba(255, 215, 0, 0.40);
+  --glow-err:  rgba(255, 0, 0, 0.40);
+
+  /* ---- data-series palette --------------------------------------
+     For multi-metric dashboards (sparklines, tiles, line charts).
+     chart-1 is always the primary series. */
+  --chart-1: #00ffff;
+  --chart-2: #ffd700;
+  --chart-3: #88ccff;
+  --chart-4: #44bbaa;
+  --chart-5: #cc99ff;
+  --chart-6: #dd9944;
+  --chart-7: #ffaacc;
+  --chart-8: #88aa44;
+
+  /* ---- heatmap ramp ---------------------------------------------
+     Used by .coregrid and any per-cell load grid. Each step carries
+     a numeric label, so the ramp is never the only encoding.
+     cell-1 was #006b6b, which put black text at 3.32:1 — under the
+     4.5:1 floor for the label. #0a8f8f reads 5.34:1.
+
+     The label colours are their own tokens rather than reusing
+     --on-accent, because a light theme's ramp runs dark-to-light in
+     the opposite direction and needs light labels on its hot cells.
+     Without these a light theme would have to override a RULE, which
+     the theme contract forbids. */
+  --cell-0:     #191922;
+  --cell-0-ink: #9b958a;
+  --cell-1:     #0a8f8f;
+  --cell-2:     #00bdbd;
+  --cell-3:     var(--accent);
+  --cell-ink:     var(--on-accent);   /* label on cell-1 and cell-2 */
+  --cell-hot-ink: var(--on-accent);   /* label on cell-3 */
+
+  /* ---- type ----------------------------------------------------- */
+  --mono:    'Geist Mono', ui-monospace, Menlo, monospace;
+  --pixel:   'Major Mono Display', ui-monospace, monospace;
+  --hud:     'Departure Mono', 'Geist Mono', ui-monospace, monospace;
+
+  /* ---- space ----------------------------------------------------- */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 16px;  --s-4: 24px;  --s-5: 40px;  --s-6: 64px;
+
+  /* ---- motion ----------------------------------------------------
+     One duration token so every transition shares a rhythm, and one
+     transition shorthand. Both collapse to 0 under reduced-motion. */
+  --dur:   0.3s;
+  --dur-2: 0.15s;
+  --t: all var(--dur);
+
+  /* ---- ergonomics -------------------------------------------------
+     Minimum comfortable touch target. Controls keep their drawn size
+     and grow their HIT area to this, so the dense look survives. */
+  --hit: 44px;
+
+  /* ---- z scale ---------------------------------------------------- */
+  --z-nav: 50;  --z-hud: 60;  --z-tabbar: 80;  --z-modal: 300;  --z-toast: 1000;
+}
+
+/* Honour the OS motion preference. Every animated property in this
+   file routes through --dur / --dur-2 or is named here, so this one
+   block disables the lot rather than each component opting in. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur: 0.001s; --dur-2: 0.001s; }
+  *, *::before, *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Cool near-black drafting backdrop as a fixed root layer.
+   background-color under the gradients matters: gradients only cover
+   the document box, so momentum/rubber-band scrolling past either
+   edge would otherwise expose the browser's white canvas.
+   color-scheme: dark makes the browser paint its own surfaces —
+   scrollbars, overscroll gutter, form controls — dark too. */
+html {
+  background-color: var(--bg-0);
+  background-image:
+    radial-gradient(1200px 800px at 70% 26%, var(--glow-faint), transparent 60%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1));
+  background-attachment: fixed;
+  min-height: 100%;
+  color-scheme: dark;
+  overscroll-behavior: none;
+}
+
+body {
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+::selection { background: var(--accent); color: var(--on-accent); }
+
+a { color: var(--ink-2); text-decoration: none; transition: color var(--dur); }
+a:hover { color: var(--accent); }
+
+/* One focus ring for the whole system. The aesthetic leans on hover,
+   which does not exist on the phones this is mostly used from — so
+   the keyboard/AT path needs its own unmistakable affordance. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* dot-grid surface — put on body or any section */
+.grid-bg {
+  background-image: radial-gradient(var(--dot-grid) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* Skip link — first tabbable thing on the page. inline-flex + min-height
+   rather than padding alone: at 0.65rem the padded box came out 37px,
+   under the 44px floor, and this is the one control a keyboard-only
+   user hits before anything else. */
+.skip {
+  position: absolute; left: -9999px; top: 0; z-index: 999;
+  display: inline-flex; align-items: center;
+  min-height: var(--hit);
+  padding: 10px 16px;
+  background: var(--accent); color: var(--on-accent);
+  font-size: 0.65rem; font-weight: 900; letter-spacing: 2px; text-transform: uppercase;
+}
+.skip:focus { left: 0; }
+
+/* The `hidden` attribute must actually hide.
+   The UA stylesheet's `[hidden] { display: none }` loses to ANY author
+   `display:` declaration — same specificity, and author styles beat UA styles
+   outright. So `.btn { display: inline-flex }` silently defeats
+   `button.hidden = true`, and the control stays on screen while every
+   JS check reports it hidden. That mismatch is genuinely hard to debug: the
+   DOM says hidden, the screen says otherwise.
+
+   !important is warranted here precisely because this must outrank every
+   component's own display rule. */
+[hidden] { display: none !important; }
+
+/* Visually hidden but announced. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* ============================================================
+   TYPOGRAPHY
+   ============================================================ */
+.display {
+  font-family: var(--pixel);
+  font-size: clamp(2.2rem, 6vw, 4.5rem);
+  line-height: 1.05;
+  text-transform: lowercase;
+  letter-spacing: -2px;
+}
+
+.h1 { font-size: 2.8rem; font-weight: 900; text-transform: uppercase; letter-spacing: -1px; }
+.h2 { font-size: 1.4rem; font-weight: 900; text-transform: uppercase; letter-spacing: -0.5px; }
+
+/* uppercase micro-label — the workhorse */
+.label {
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  color: var(--dim);
+}
+.label--accent { color: var(--accent); }
+
+.meta {
+  font-family: var(--hud);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--dim);
+}
+
+/* Readouts use tabular figures everywhere. Proportional digits make a
+   live value jitter horizontally as it changes, which reads as the
+   layout being unstable rather than the number being live. */
+.value {
+  font-size: 2.4rem; font-weight: 700; line-height: 1.1; letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.num, .tnum { font-variant-numeric: tabular-nums; }
+
+.kbd {
+  font-family: var(--hud);
+  font-size: 0.65rem;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  background: var(--panel);
+  color: var(--ink-2);
+}
+
+/* ============================================================
+   ICONS
+   One stroke language everywhere: 1.5px, square caps, no fills.
+   Pair with an inline <svg class="sprite"> of <symbol> defs and
+   reference them as <svg class="ic"><use href="#i-name"></use></svg>.
+   ============================================================ */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+.ic {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter;
+}
+.ic--lg { width: 22px; height: 22px; }
+.ic--xl { width: 30px; height: 30px; }
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  position: relative;
+  padding: 12px 24px;
+  min-height: var(--hit);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  transition: var(--t);
+}
+.btn:hover { background: transparent; color: var(--accent); }
+
+.btn--ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+.btn--ghost:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-03); }
+
+.btn--danger { background: transparent; color: var(--err); border-color: var(--err-line); }
+.btn--danger:hover { background: var(--err); color: var(--on-accent); border-color: var(--err); }
+
+/* Small buttons keep their drawn size but grow an invisible hit area
+   out to --hit, so a 30px-tall chip is still a 44px touch target. */
+.btn--sm {
+  padding: 7px 14px; font-size: 0.65rem; letter-spacing: 1.5px;
+  min-height: 0;
+}
+.btn--sm::after {
+  content: '';
+  position: absolute; left: 0; right: 0;
+  top: 50%; transform: translateY(-50%);
+  min-height: var(--hit); height: 100%;
+}
+
+.btn:disabled, .btn--disabled {
+  background: transparent;
+  color: var(--dim);
+  border-color: var(--line);
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+
+/* Icon button — square, ghost, used in panel headers and HUDs. */
+.iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex: none;
+  position: relative;
+  background: var(--panel); color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  cursor: pointer; transition: var(--t);
+}
+.iconbtn::after {
+  content: '';
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--hit); height: var(--hit);
+}
+.iconbtn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-03); }
+.iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.iconbtn--danger:hover:not(:disabled) { border-color: var(--err); color: var(--err); background: var(--err-wash); }
+
+/* ============================================================
+   BADGES / STATUS DOTS
+   ============================================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 0.6rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--ink-2);
+}
+.badge .dot { width: 6px; height: 6px; flex: none; }
+
+.dot { display: inline-block; width: 8px; height: 8px; background: var(--dim); }
+.dot--ok    { background: var(--ok);     box-shadow: 0 0 8px var(--ok); }
+.dot--live  { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s ease-in-out infinite; }
+.dot--warn  { background: var(--warn);   box-shadow: 0 0 8px var(--warn); }
+.dot--err   { background: var(--err);    box-shadow: 0 0 8px var(--err); animation: pulse 0.8s ease-in-out infinite; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ============================================================
+   PANELS / CARDS
+   ============================================================ */
+.panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  padding: var(--s-4);
+  transition: var(--t);
+}
+.panel:hover { border-color: var(--line-hover); background: var(--accent-03); }
+
+/* top gradient accent that fades in on hover */
+.panel--glowtop::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.panel--glowtop:hover::before { opacity: 1; }
+
+/* corner brackets */
+.corners::before, .corners::after,
+.corners > .c::before, .corners > .c::after {
+  content: '';
+  position: absolute;
+  width: 14px; height: 14px;
+  border: 0 solid var(--accent);
+  pointer-events: none;
+}
+.corners::before        { top: -1px;    left: -1px;  border-top-width: 1px; border-left-width: 1px; }
+.corners::after         { top: -1px;    right: -1px; border-top-width: 1px; border-right-width: 1px; }
+.corners > .c::before   { bottom: -1px; left: -1px;  border-bottom-width: 1px; border-left-width: 1px; }
+.corners > .c::after    { bottom: -1px; right: -1px; border-bottom-width: 1px; border-right-width: 1px; }
+
+/* .panel--glowtop and .corners each style ::before on the same
+   element, and an element only has one — combining them merges the
+   corner bracket with the glow gradient and hover paints a solid
+   accent block in the top-left. They are alternatives; this guard
+   keeps the artifact from coming back if both are ever applied. */
+.panel--glowtop.corners::before { background: none; opacity: 1; }
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Section heading with an index marker — the drafting-sheet caption. */
+.section-head {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding-bottom: var(--s-2); margin-bottom: var(--s-3);
+  border-bottom: 1px solid var(--line);
+}
+.section-head .idx { font-family: var(--hud); font-size: 0.6rem; letter-spacing: 0.18em; color: var(--accent); }
+.section-head .spacer { flex: 1; }
+
+/* ---------- stat tile ---------- */
+.stat { display: flex; flex-direction: column; gap: 6px; }
+.stat .delta { font-size: 0.65rem; font-weight: 900; letter-spacing: 1px; }
+.delta--up   { color: var(--ok); }
+.delta--down { color: var(--err); }
+
+/* Auto-fitting tile grid. 150px floor rather than 190 so a 390px
+   phone lands two tiles per row instead of one. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2px; }
+
+/* ============================================================
+   WINDOW FRAME / TERMINAL
+   ============================================================ */
+.window {
+  border: 1px solid var(--line);
+  background: var(--chrome-4);
+}
+.window-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--tint-2);
+  border-bottom: 1px solid var(--line);
+}
+.window-bar .wdot { width: 8px; height: 8px; border-radius: 50%; background: var(--tint-3); }
+.window-bar .wtitle { margin-left: 6px; }
+.window-body { padding: var(--s-3) var(--s-4); }
+
+.term { font-size: 0.8rem; line-height: 1.8; }
+.term .ps1 { color: var(--accent); }
+.term .out { color: var(--ink-2); }
+.term .err { color: var(--err); }
+.cursor {
+  display: inline-block;
+  width: 8px; height: 15px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink 1.1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ============================================================
+   BROWSER / PREVIEW FRAME
+   ============================================================ */
+.browser { display: flex; flex-direction: column; border: 1px solid var(--line); background: var(--chrome-4); overflow: hidden; }
+.browser-bar {
+  display: flex; align-items: center; gap: 10px;
+  height: 32px; padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--tint-1);
+}
+.browser-bar .dots { display: flex; gap: 5px; }
+.browser-bar .dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--tint-3); }
+.browser-bar .nav-btns { display: flex; gap: 8px; color: var(--dim); font-size: 0.75rem; flex: none; }
+.browser-bar .url {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 0.68rem;
+  color: var(--ink-2);
+  padding: 4px 10px;
+  background: var(--tint-2);
+  border: 1px solid var(--line);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.browser-bar .url .scheme { color: var(--dim); }
+.browser-bar .url .host   { color: var(--ink); }
+.browser-bar .url .path   { color: var(--accent); }
+.browser-bar .live {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--hud); font-size: 0.6rem;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--accent); flex: none;
+}
+.browser-bar .live::before { content: ''; width: 6px; height: 6px; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s ease-in-out infinite; }
+.browser-body { flex: 1; overflow-y: auto; padding: 18px 22px; background: linear-gradient(180deg, var(--accent-03), transparent 40%); }
+
+/* ============================================================
+   CODE BLOCK
+   ============================================================ */
+.code { padding: 14px 18px; font-size: 0.76rem; line-height: 1.65; color: var(--ink-2); overflow-x: auto; }
+.code-ln { display: flex; gap: 18px; align-items: flex-start; }
+.code-ln .lno { color: var(--dim); user-select: none; min-width: 2.5ch; text-align: right; flex: none; font-size: 0.68rem; line-height: 1.95; }
+.code-ln .src { font-family: var(--mono); white-space: pre-wrap; word-break: break-word; min-width: 0; flex: 1; }
+.tok-kw   { color: var(--accent); }
+.tok-str  { color: var(--info); }
+.tok-num  { color: var(--chart-5); }
+.tok-com  { color: var(--dim); font-style: italic; }
+.tok-fn   { color: var(--ink); }
+.tok-tag  { color: var(--chart-7); }
+.tok-attr { color: var(--info); }
+
+/* ============================================================
+   APP SHELL
+   Full-height column so the status bar sits on the viewport bottom
+   when a page is short, instead of leaving a gap under it.
+   ============================================================ */
+html, body { min-height: 100%; }
+body.app { display: flex; flex-direction: column; min-height: 100dvh; }
+body.app .wrap { flex: 1 0 auto; }
+body.app .statusbar { flex: none; }
+
+/* Both bars stick, so the nav starts below the hudbar rather than at
+   0 — otherwise they occupy the same 30px and the nav renders on top
+   of the status strip. */
+body.app .hudbar { position: sticky; top: 0; z-index: var(--z-hud); flex: none; }
+body.app .nav    { position: sticky; top: 30px; z-index: var(--z-nav); flex: none; }
+
+.wrap {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  /* Modest bottom padding here — the big clearance is only needed
+     under the mobile tab bar (set in the breakpoint below). */
+  padding: var(--s-4) var(--s-4) var(--s-5);
+  padding-left:  max(var(--s-4), env(safe-area-inset-left));
+  padding-right: max(var(--s-4), env(safe-area-inset-right));
+}
+
+.stack-lg { display: flex; flex-direction: column; gap: var(--s-4); }
+
+/* ---------- status bar ---------- */
+.statusbar {
+  display: flex; align-items: center; gap: 20px;
+  min-height: 24px; padding: 0 16px;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--line);
+  background: var(--chrome);
+  font-family: var(--hud);
+  font-size: 0.6rem; letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.statusbar .ok { color: var(--accent); display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .ok::before { content: ''; width: 5px; height: 5px; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.statusbar .right { margin-left: auto; }
+
+/* ---------- nav ---------- */
+.nav {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 0 24px;
+  padding-left: max(24px, env(safe-area-inset-left));
+  padding-right: max(24px, env(safe-area-inset-right));
+  gap: 24px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+}
+.nav-logo { font-family: var(--pixel); font-size: 1.4rem; text-transform: lowercase; letter-spacing: 0.05em; color: var(--ink); }
+.nav-logo .dot-accent { color: var(--accent); }
+.nav-links { display: flex; gap: 26px; margin-left: auto; }
+.nav-link {
+  position: relative;
+  padding: 4px 0;
+  font-size: 0.6rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--dim);
+  transition: color var(--dur-2);
+}
+/* Grow the hit area vertically to --hit without moving the underline. */
+.nav-link::before {
+  content: '';
+  position: absolute; left: 0; right: 0;
+  top: 50%; transform: translateY(-50%);
+  height: var(--hit);
+}
+.nav-link::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 100%; bottom: 0;
+  height: 1px;
+  background: var(--accent);
+  transition: right 0.25s;
+}
+.nav-link:hover { color: var(--ink); }
+.nav-link.active { color: var(--accent); }
+.nav-link:hover::after, .nav-link.active::after { right: 0; }
+
+/* ---------- bottom tab bar (mobile only) ---------- */
+.tabbar { display: none; }
+
+/* ============================================================
+   DRAFTING / BLUEPRINT
+   Engineering-drawing sheet language: a segmented status strip, a
+   titled drawing frame, leader-line fields, a title block, gate
+   cards and a blueprint figure area.
+   ============================================================ */
+
+/* HUD status strip — the segmented top/bottom bar
+   (SESSION · USER · UPTIME · LOCAL …). Each .seg is a LABEL value pair. */
+.hudbar {
+  display: flex; align-items: center; gap: 26px;
+  height: 30px; padding: 0 16px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome-2);
+  font-family: var(--hud);
+  font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--dim);
+  overflow-x: auto; scrollbar-width: none; white-space: nowrap;
+}
+.hudbar::-webkit-scrollbar { display: none; }
+.hudbar--bottom { border-bottom: 0; border-top: 1px solid var(--line); }
+.hudbar .seg { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.hudbar .seg b { color: var(--ink-2); font-weight: 400; }
+.hudbar .seg--accent, .hudbar .seg--accent b { color: var(--accent); }
+.hudbar .seg--live::before {
+  content: ''; width: 6px; height: 6px; flex: none;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  animation: pulse 2s ease-in-out infinite;
+}
+.hudbar .right { margin-left: auto; }
+
+/* Drafting sheet — a titled drawing frame with a hairline inner
+   border, like a bordered engineering sheet. Nest .sheet-inner. */
+.sheet { position: relative; border: 1px solid var(--line); background: var(--accent-03); }
+.sheet::before {
+  content: ''; position: absolute; inset: 7px;
+  border: 1px solid var(--line); pointer-events: none;
+}
+.sheet-inner { position: relative; padding: var(--s-4); }
+
+/* Sheet header — drawing no · title (left) · rev · scale · sheet (right). */
+.sheet-header {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding-bottom: var(--s-2); margin-bottom: var(--s-3);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--hud); font-size: 0.6rem;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim);
+}
+.sheet-header b { color: var(--ink-2); font-weight: 400; }
+.sheet-header em { color: var(--accent); font-style: normal; }
+.sheet-header .right { text-align: right; }
+.sheet-actions { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Leader-line field — LABEL ······· value (dotted leader between). */
+.fieldline { display: flex; align-items: baseline; gap: 10px; font-size: 0.75rem; }
+.fieldline .fl-k {
+  font-family: var(--hud); font-size: 0.6rem;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+  white-space: nowrap; flex: none;
+}
+.fieldline .fl-lead { flex: 1; border-bottom: 1px dotted var(--line); align-self: center; min-width: 16px; }
+.fieldline .fl-v { color: var(--ink); white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
+.fieldline .fl-v--accent { color: var(--accent); }
+
+/* Title block — the labeled cell grid stamped along a drawing's edge. */
+.titleblock {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  border: 1px solid var(--line);
+}
+.titleblock .tb {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 9px 13px; border-right: 1px solid var(--line);
+  min-width: 0;
+}
+.titleblock .tb:last-child { border-right: 0; }
+.titleblock .tb .tb-k {
+  font-family: var(--hud); font-size: 0.52rem;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+}
+.titleblock .tb .tb-v { font-size: 0.82rem; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.titleblock .tb .tb-v--accent { color: var(--accent); }
+
+/* Gate card — index + code (top), icon + name (bottom). Nav-tile pattern. */
+.gate {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 14px 16px; text-align: left; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line-2);
+  color: var(--ink); font-family: var(--mono); transition: var(--t);
+}
+.gate:hover { border-color: var(--accent); background: var(--accent-03); }
+.gate .gate-top {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--hud); font-size: 0.55rem;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+}
+.gate .gate-code { color: var(--accent); }
+.gate .gate-name {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 0.95rem; font-weight: 900;
+  text-transform: uppercase; letter-spacing: 1px; color: var(--ink);
+}
+.gate:hover .gate-name { color: var(--accent); }
+
+/* Blueprint figure area — dotted engineering grid + caption + leader callouts. */
+.blueprint {
+  position: relative; padding: var(--s-5) var(--s-4) var(--s-4);
+  border: 1px solid var(--line);
+  background-image:
+    linear-gradient(var(--accent-03) 1px, transparent 1px),
+    linear-gradient(90deg, var(--accent-03) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.blueprint .bp-cap {
+  position: absolute; top: 10px; left: 13px;
+  font-family: var(--hud); font-size: 0.55rem;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+}
+.blueprint .bp-cap em { color: var(--accent); font-style: normal; }
+.callout {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--hud); font-size: 0.55rem;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2);
+}
+.callout::before { content: ''; width: 24px; height: 1px; background: var(--accent); flex: none; }
+.callout--l { flex-direction: row-reverse; }
+
+/* Stamp — the "ISSUED / VERIFIED" drawing seal. */
+.stamp {
+  display: inline-block; padding: 4px 10px;
+  border: 1px solid var(--accent); color: var(--accent);
+  font-family: var(--hud); font-size: 0.55rem;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  transform: rotate(-4deg);
+}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+.table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.table th {
+  text-align: left;
+  font-size: 0.6rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--dim);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.table td { padding: 10px 14px; border-bottom: 1px solid var(--line-2); color: var(--ink-2); }
+.table tbody tr { transition: background var(--dur-2); }
+.table tbody tr:hover { background: var(--accent-03); }
+.table td:first-child { color: var(--ink); }
+.num { text-align: right; }
+.table th.num { text-align: right; }
+
+/* horizontal-scroll wrapper for tables on small screens */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap .table { min-width: 560px; }
+
+/* ============================================================
+   FORMS
+   Control boundaries use --line-strong, not --line: the border is
+   what says "this is interactive", so it has to clear 3:1.
+   ============================================================ */
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field > label { font-size: 0.6rem; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; color: var(--dim); }
+.field .help { font-family: var(--hud); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.field .err-msg { font-size: 0.68rem; color: var(--err); display: flex; align-items: baseline; gap: 6px; }
+
+.input, .select, .textarea {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  padding: 11px 14px;
+  min-height: var(--hit);
+  outline: none;
+  transition: var(--t);
+  width: 100%;
+}
+.input::placeholder, .textarea::placeholder { color: var(--dim); }
+.input:focus, .select:focus, .textarea:focus { border-color: var(--accent); background: var(--accent-03); }
+.input[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--err); }
+.input:disabled, .select:disabled, .textarea:disabled { opacity: 0.45; cursor: not-allowed; }
+.textarea { min-height: 96px; resize: vertical; line-height: 1.6; }
+
+.select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-2) 50%),
+                    linear-gradient(135deg, var(--ink-2) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 34px;
+  cursor: pointer;
+}
+.select option {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+.select option:checked {
+  background: var(--accent-08);
+  color: var(--accent);
+}
+
+/* toggle */
+.toggle { position: relative; display: inline-block; width: 44px; height: 22px; cursor: pointer; flex: none; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle .track {
+  position: absolute; inset: 0;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  transition: var(--t);
+}
+.toggle .track::before {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 14px; height: 14px;
+  background: var(--ink-2);
+  transition: var(--t);
+}
+.toggle input:checked + .track { border-color: var(--accent); background: var(--accent-08); }
+.toggle input:checked + .track::before {
+  transform: translateX(22px);
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.toggle input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* checkbox */
+.check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.75rem; color: var(--ink-2); min-height: var(--hit); }
+.check input {
+  appearance: none; width: 18px; height: 18px;
+  border: 1px solid var(--line-strong); background: var(--panel);
+  cursor: pointer; transition: var(--t); flex: none;
+}
+.check input:checked { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px var(--glow-soft); }
+.check input:checked::before {
+  content: ''; display: block; width: 100%; height: 100%;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: var(--on-accent);
+}
+
+/* range */
+.range { appearance: none; width: 100%; height: 2px; background: var(--line-strong); outline: none; cursor: pointer; }
+.range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px; height: 14px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--glow);
+  cursor: grab;
+}
+.range::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 0; background: var(--accent); cursor: grab; }
+.range:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================
+   CONTROLS — stepper, dial, segmented, toggle rows
+   ============================================================ */
+
+/* Radial setpoint dial. SVG is authored 256×256 with a 270° arc and
+   the gap at the bottom; these rules only colour it. */
+.dialwrap { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); width: 100%; }
+.dial { position: relative; width: 100%; max-width: 260px; aspect-ratio: 1; }
+.dial svg { width: 100%; height: 100%; display: block; }
+.dial .d-track { fill: none; stroke: var(--line-2); stroke-width: 10; }
+.dial .d-fill {
+  fill: none; stroke: var(--accent); stroke-width: 10;
+  filter: drop-shadow(0 0 6px var(--glow-soft));
+  transition: stroke-dasharray var(--dur) ease, stroke var(--dur-2);
+}
+.dial .d-tick { stroke: var(--line-strong); stroke-width: 1; }
+.dial.is-off .d-fill { stroke: var(--dim); filter: none; }
+.dial .d-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; pointer-events: none; text-align: center;
+}
+.dial .d-set {
+  font-size: 3.1rem; font-weight: 700; line-height: 1; letter-spacing: -2px;
+  color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.dial .d-set sup { font-size: 1.1rem; font-weight: 400; vertical-align: super; color: var(--dim); }
+.dial.is-off .d-set { color: var(--dim); }
+.d-range { opacity: 0.7; margin-top: 2px; }
+
+.dialbtns { display: flex; align-items: center; width: 100%; max-width: 300px; }
+.dialbtns .range { margin: 0 14px; height: 2px; }
+.dialbtns .range::-webkit-slider-runnable-track { height: 2px; background: var(--line-strong); }
+.dialbtns .range::-moz-range-track { height: 2px; background: var(--line-strong); }
+.dialbtns .range::-webkit-slider-thumb { margin-top: -6px; }
+
+.stepbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--hit); height: var(--hit); flex: none;
+  background: var(--panel); color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  cursor: pointer; transition: var(--t);
+}
+.stepbtn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-03); }
+.stepbtn:disabled { color: var(--dim); cursor: not-allowed; opacity: 0.5; }
+
+.powerbtn { width: 100%; justify-content: center; min-height: 52px; letter-spacing: 3px; }
+
+/* Segmented control — equal-width exclusive choice. Use real
+   <button aria-pressed> so state is announced, not just coloured. */
+.segctl { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; }
+.segctl button {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: var(--hit); padding: 9px 8px;
+  background: var(--panel); color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  font-family: var(--mono); font-size: 0.62rem; font-weight: 900;
+  letter-spacing: 1px; text-transform: uppercase;
+  cursor: pointer; transition: var(--t);
+}
+.segctl button:hover:not(:disabled) { border-color: var(--line-hover); color: var(--ink); background: var(--accent-03); }
+.segctl button[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--accent); background: var(--accent-08);
+}
+.segctl button:disabled { color: var(--dim); cursor: not-allowed; opacity: 0.45; }
+
+/* Glyph variant — icon above label, for controls whose names carry
+   no meaning on their own ("Eco 2", "Swing 3"). The label stays:
+   an icon-only control has no accessible name. */
+.segctl--glyph button { flex-direction: column; gap: 6px; padding: 11px 6px; }
+.segctl--glyph .ic { width: 26px; height: 26px; }
+.segctl--glyph .seglabel { font-size: 0.52rem; letter-spacing: 0.5px; }
+
+/* Toggle row — label + switch, in an auto-fitting grid. */
+.togglegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2px; }
+.togrow {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: var(--hit); padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line-2);
+  color: var(--ink-2); cursor: pointer; transition: var(--t);
+  text-align: left; font-family: var(--mono);
+}
+.togrow:hover { border-color: var(--line-hover); background: var(--accent-03); }
+.togrow .tlabel {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  font-size: 0.65rem; font-weight: 900; letter-spacing: 1px; text-transform: uppercase;
+}
+.togrow[data-on="1"] .tlabel, .togrow[data-on="1"] .ic { color: var(--accent); }
+.togrow[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
+/* The ROW is the control; the switch inside is decoration driven by
+   data-on. Render it WITHOUT an <input> — a real input inside the
+   button is a nested interactive control, which axe flags as a
+   serious violation and which screen readers announce twice:
+     <button class="togrow" data-on="1" aria-pressed="true">
+       <span class="tlabel">…</span>
+       <span class="toggle"><span class="track"></span></span>
+     </button>
+   Use the standalone .toggle (with its input) anywhere the switch
+   is the control in its own right. */
+.togrow .toggle { pointer-events: none; }
+.togrow[data-on="1"] .toggle .track { border-color: var(--accent); background: var(--accent-08); }
+.togrow[data-on="1"] .toggle .track::before { transform: translateX(22px); background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.togrow--action { font-family: var(--mono); text-align: left; }
+.togrow--action:hover { border-color: var(--accent); }
+.togrow--action .meta { color: var(--accent); }
+
+/* ============================================================
+   PROGRESS / METERS
+   ============================================================ */
+.bar { height: 4px; background: var(--line-2); position: relative; overflow: hidden; }
+.bar .fill { height: 100%; background: var(--accent); box-shadow: 0 0 10px var(--glow); transition: width 0.4s; }
+.bar .fill--warn { background: var(--warn); box-shadow: 0 0 10px var(--glow-warn); }
+.bar .fill--err  { background: var(--err);  box-shadow: 0 0 10px var(--glow-err); }
+
+.bar--scan .fill { animation: scan 2.2s ease-in-out infinite; }
+@keyframes scan { 0% { width: 0; } 70% { width: 100%; } 100% { width: 100%; opacity: 0; } }
+
+/* segmented meter */
+.meter { display: flex; gap: 3px; }
+.meter i { flex: 1; height: 14px; background: var(--line-2); }
+.meter i.on { background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+
+/* Skeleton placeholder for content that takes >300ms. */
+.skeleton {
+  background: linear-gradient(90deg, var(--line-2) 0%, var(--tint-2) 50%, var(--line-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  min-height: 1em;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ============================================================
+   TABS
+   ============================================================ */
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tab {
+  padding: 10px 20px;
+  min-height: var(--hit);
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--dim);
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: var(--t);
+}
+.tab:hover { color: var(--ink); }
+.tab.active, .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ============================================================
+   ALERTS
+   ============================================================ */
+.alert {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 18px;
+  font-size: 0.75rem;
+  border: 1px solid var(--line);
+  border-left-width: 2px;
+  background: var(--panel);
+  color: var(--ink-2);
+}
+.alert b { color: var(--ink); text-transform: uppercase; letter-spacing: 1px; font-size: 0.65rem; }
+.alert--info { border-left-color: var(--accent); }
+.alert--ok   { border-left-color: var(--ok); }
+.alert--warn { border-left-color: var(--warn); }
+.alert--err  { border-left-color: var(--err); background: var(--err-wash); }
+
+/* Empty state — what to show instead of a blank panel. */
+.empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--s-2); padding: var(--s-5) var(--s-3); text-align: center;
+  color: var(--dim);
+}
+.empty .ic { width: 30px; height: 30px; opacity: 0.5; }
+.empty b { color: var(--ink-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 2px; }
+.empty p { font-size: 0.72rem; max-width: 42ch; line-height: 1.6; }
+
+/* ============================================================
+   CHARTS
+   ============================================================ */
+.chart { display: flex; align-items: flex-end; gap: 6px; height: 120px; }
+.chart i {
+  flex: 1;
+  background: linear-gradient(to top, var(--glow-mid), var(--glow-strong));
+  border-top: 1px solid var(--accent);
+  transition: var(--t);
+  min-height: 2px;
+}
+.chart i:hover { background: var(--accent); box-shadow: 0 0 14px var(--glow); }
+
+/* sparkline (inline svg helper colors) */
+.spark { stroke: var(--accent); fill: none; stroke-width: 1.5; }
+.spark-fill { fill: var(--glow-faint); stroke: none; }
+
+/* line chart (svg) — multi-series with dotted grid */
+.linechart { width: 100%; display: block; }
+.linechart .gridline { stroke: var(--line-strong); stroke-dasharray: 1 5; }
+.linechart .series { fill: none; stroke-width: 1.5; }
+.linechart .area { stroke: none; opacity: 0.08; }
+
+/* chart legend */
+.legend { display: flex; gap: 18px; flex-wrap: wrap; }
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--hud);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-2);
+}
+.legend i { width: 10px; height: 2px; flex: none; }
+
+/* Core grid — per-cell load heatmap (cpu cores, nodes, shards).
+   Every cell carries its index as text, so the ramp is a second
+   encoding rather than the only one. */
+.coregrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(26px, 1fr)); gap: 2px; }
+.coregrid i {
+  aspect-ratio: 1;
+  background: var(--cell-0);
+  position: relative;
+  transition: background var(--dur);
+}
+.coregrid i::after {
+  content: attr(data-n);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--hud);
+  font-size: 0.5rem;
+  color: var(--cell-0-ink);
+}
+.coregrid i.med { background: var(--cell-1); }
+.coregrid i.hi  { background: var(--cell-2); }
+.coregrid i.max { background: var(--cell-3); box-shadow: 0 0 8px var(--glow); }
+.coregrid i.med::after, .coregrid i.hi::after { color: var(--cell-ink); }
+.coregrid i.max::after { color: var(--cell-hot-ink); }
+
+/* ============================================================
+   LIST ROWS
+   ============================================================ */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--hit);
+  padding: 14px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-2);
+  transition: var(--t);
+}
+.row:hover { color: var(--ink-hi); border-color: var(--line-hover); background: var(--accent-03); }
+.row + .row { margin-top: 2px; }
+
+.cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 2px; }
+
+/* Log line — timestamped activity entry. */
+.logline {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 9px 0; border-bottom: 1px solid var(--line-2);
+  font-size: 0.73rem;
+}
+.logline:last-child { border-bottom: 0; }
+.logline time { font-family: var(--hud); font-size: 0.6rem; letter-spacing: 0.14em; color: var(--dim); flex: none; font-variant-numeric: tabular-nums; }
+.logline .lmsg { color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
+
+/* ============================================================
+   HOLO TEXT
+   ============================================================ */
+.holo {
+  background: linear-gradient(90deg, var(--ink) 0%, var(--accent) 25%, var(--ink) 50%, var(--accent) 75%, var(--ink) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: holoShift 6s linear infinite;
+}
+@keyframes holoShift { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+
+/* ============================================================
+   TOOLTIP
+   Hover-only, so never the sole carrier of information — pair with
+   an aria-label or visible text. Disabled on touch layouts below.
+   ============================================================ */
+[data-tip] { position: relative; }
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 6px 10px;
+  font-size: 0.6rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: var(--bg-0);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  z-index: 10;
+}
+
+/* ============================================================
+   GAUGE (circular svg progress)
+   ============================================================ */
+.gauge { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.gauge .g-ring { width: 76px; height: 76px; transform: rotate(-90deg); display: block; }
+.gauge .g-track { fill: none; stroke: var(--line-2); stroke-width: 6; }
+.gauge .g-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-linecap: butt;
+  filter: drop-shadow(0 0 4px var(--glow));
+  transition: stroke-dasharray 0.6s ease, stroke var(--dur-2);
+}
+.gauge.warn .g-fill { stroke: var(--warn); filter: drop-shadow(0 0 4px var(--glow-warn)); }
+.gauge.err  .g-fill { stroke: var(--err);  filter: drop-shadow(0 0 4px var(--glow-err)); }
+.gauge .g-val { font-size: 0.9rem; font-weight: 700; color: var(--ink); letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+.gauge .g-label {
+  font-family: var(--hud);
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--dim);
+}
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+.toast-stack {
+  position: fixed;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  right: calc(24px + env(safe-area-inset-right));
+  left: auto;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  z-index: var(--z-toast);
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 240px;
+  max-width: min(92vw, 380px);
+  padding: 12px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-left-width: 2px;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  animation: toastIn 0.2s ease-out;
+  pointer-events: auto;
+  transition: opacity var(--dur-2);
+}
+.toast b { color: var(--ink); text-transform: uppercase; letter-spacing: 1px; font-size: 0.65rem; }
+.toast--ok   { border-left-color: var(--ok); }
+.toast--warn { border-left-color: var(--warn); }
+.toast--err  { border-left-color: var(--err); }
+.toast--info { border-left-color: var(--accent); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ============================================================
+   MODAL
+   ============================================================ */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  z-index: var(--z-modal);
+}
+.modal {
+  width: 100%; max-width: 480px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px;
+  background: var(--tint-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.7rem; font-weight: 900;
+  text-transform: uppercase; letter-spacing: 2px;
+  color: var(--ink);
+}
+.modal-body { padding: 18px; overflow-y: auto; }
+.modal-foot {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--accent); }
+@media (pointer: coarse) {
+  ::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  * { scrollbar-width: none; }
+}
+
+/* ============================================================
+   LAYOUT HELPERS
+   ============================================================ */
+.grid { display: grid; gap: 2px; }
+.grid--2 { grid-template-columns: repeat(2, 1fr); }
+.grid--3 { grid-template-columns: repeat(3, 1fr); }
+.grid--4 { grid-template-columns: repeat(4, 1fr); }
+.grid--auto { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+@media (max-width: 768px) {
+  .grid--2, .grid--3 { grid-template-columns: 1fr; }
+  .grid--4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+.flex { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: var(--s-3); }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+/* Below 860px the top nav links give way to a fixed bottom tab bar —
+   the standard mobile primary-nav pattern, and reachable one-handed. */
+@media (max-width: 860px) {
+  .nav-links { display: none; }
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-tabbar);
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+    background: var(--chrome-3);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(8px);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabbar .tabitem {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 5px; min-height: 56px; padding: 8px 4px;
+    background: none; border: 0; border-top: 1px solid transparent; margin-top: -1px;
+    font-family: var(--mono); font-size: 0.5rem; font-weight: 900;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--dim); cursor: pointer; transition: color var(--dur-2);
+  }
+  .tabbar .tabitem.active { color: var(--accent); border-top-color: var(--accent); }
+  /* The fixed tab bar owns the bottom edge; the status bar would sit
+     underneath it and its content is already in the hudbar, so drop
+     it rather than stack two strips. */
+  body.app .statusbar { display: none; }
+  .wrap { padding: var(--s-3) var(--s-3) 110px; }
+}
+
+@media (max-width: 700px) {
+  .hide-sm { display: none; }
+
+  .nav { height: 48px; padding: 0 16px; gap: 14px; }
+  .nav-logo { font-size: 1.05rem; }
+  .nav-links { gap: 18px; }
+  .nav-link { letter-spacing: 0.12em; }
+
+  .h1 { font-size: 1.9rem; }
+  .h2 { font-size: 1.15rem; }
+  .label { letter-spacing: 2.5px; font-size: 0.6rem; }
+  .value { font-size: 1.8rem; }
+
+  .panel { padding: var(--s-3); }
+  .window-body { padding: var(--s-3); }
+  .term { font-size: 0.7rem; }
+
+  .btn { padding: 11px 18px; letter-spacing: 1.5px; }
+
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 10px 14px; white-space: nowrap; flex: none; }
+
+  .table th, .table td { padding: 8px 10px; }
+
+  .chart { gap: 3px; height: 90px; }
+
+  .row { padding: 12px 14px; }
+
+  .toast-stack { left: 16px; right: 16px; bottom: calc(90px + env(safe-area-inset-bottom)); }
+  .toast { max-width: none; min-width: 0; }
+
+  /* tooltips are hover-only — disable on touch layouts */
+  [data-tip]:hover::after { display: none; }
+}
+
+/* Segmented controls stack their glyph labels tighter on narrow phones. */
+@media (max-width: 480px) {
+  .segctl--glyph button { padding: 9px 4px; }
+  .segctl--glyph .ic { width: 22px; height: 22px; }
+}

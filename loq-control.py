@@ -161,33 +161,14 @@ def save_config(cfg):
 
 # ojee-ui tokens (design-system/ojee-ui.css in pitvisor): cyan on
 # near-black, cream ink scale, zero radius, single accent.
-THEMES = {
-    'dark': dict(
-        BG='#0e0d0a', CARD='#131210', BORDER='#24221d',
-        TEXT='#e8e6df', TEXT_DIM='#a8a59c', TEXT_MUTED='#8a8478',
-        BTN_DEF='#181712', BTN_HOVER='#0d1916',
-        BTN_ACT='#00ffff', BTN_ACT_T='#000000', BTN_ACT_H='#7fffff',
-        TOG_ON='#00ffff', TOG_OFF='#1a1916', TOG_ON_H='#7fffff',
-        GR_GRID='#2a2823', GR_TEXT='#8a8478',
-        CORE_LO='#1c1b17', CORE_MED='#006b6b',
-        CORE_HI='#00bdbd', CORE_MAX='#00ffff',
-        ACCENT='#00ffff', ACCENT_DIM='#008b8b',
-    ),
-    'light': dict(
-        BG='#f0f0f0', CARD='#ffffff', BORDER='#d0d0d0',
-        TEXT='#1a1a1a', TEXT_DIM='#666666', TEXT_MUTED='#999999',
-        BTN_DEF='#e8e8e8', BTN_HOVER='#d8d8d8',
-        BTN_ACT='#1a1a1a', BTN_ACT_T='#ffffff', BTN_ACT_H='#333333',
-        TOG_ON='#333333', TOG_OFF='#e0e0e0', TOG_ON_H='#444444',
-        GR_GRID='#cccccc', GR_TEXT='#999999',
-        CORE_LO='#e0e0e0', CORE_MED='#aaaaaa',
-        CORE_HI='#666666', CORE_MAX='#1a1a1a',
-        ACCENT='#008b8b', ACCENT_DIM='#66c2c2',
-    ),
-}
+# The palette is generated from ojee-ui.css — see theme.py. It used to be
+# typed in here, and had silently drifted to a WARM near-black (#0e0d0a) while
+# the design system moved to the cool #08080e its own comment calls "NOT warm".
+# Nothing checked, so nobody noticed.
+from theme import load_theme  # noqa: E402
 
 _cfg = load_config()
-T = THEMES.get(_cfg.get('theme', 'dark'), THEMES['dark'])
+T = load_theme()
 FONT = 'Geist Mono'
 FONT_DISPLAY = 'Major Mono Display'  # unicase pixel-ish display face
 FONT_HUD = 'Departure Mono'          # tiny instrument labels (web --hud)
@@ -1332,7 +1313,7 @@ class ProcessManagerWindow(GridBackdrop):
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(12)
 
-        title = QLabel('PROCESS MANAGER')
+        title = QLabel('process manager')
         title.setFont(QFont(FONT_DISPLAY, 14))
         title.setStyleSheet(
             f'color: {T["TEXT"]}; letter-spacing: 2px;')
@@ -3652,22 +3633,86 @@ class LOQControl(QWidget):
 # ── Entry Point ───────────────────────────────────────────────────────
 
 def _kill_existing():
-    """Kill any other running instances of this app."""
-    pid = os.getpid()
-    try:
-        r = subprocess.run(
-            ['pgrep', '-f', 'loq-control.py'],
-            capture_output=True, text=True, timeout=5)
-        for line in r.stdout.strip().split('\n'):
-            if line.strip() and int(line.strip()) != pid:
-                os.kill(int(line.strip()), 15)
-    except Exception:
-        pass
+    """Kill any other running instance of this app — and nothing else.
+
+    This used to be `pgrep -f loq-control.py`, which matches ANY process whose
+    command line contains that string: the editor you have the file open in, a
+    grep for it, a shell that merely mentions it. Launching the app would
+    silently SIGTERM them. (It killed the terminal it was launched from during
+    this very rewrite.)
+
+    So: read /proc directly and require the process to actually be a Python
+    interpreter running THIS script, resolved to an absolute path.
+    """
+    me = os.getpid()
+    script = os.path.realpath(__file__)
+
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == me:
+            continue
+        try:
+            with open(f'/proc/{pid}/cmdline', 'rb') as fh:
+                argv = [a.decode('utf-8', 'replace')
+                        for a in fh.read().split(b'\x00') if a]
+        except OSError:
+            continue                      # process vanished, or not ours
+        if not argv:
+            continue
+
+        # argv[0] must be a python interpreter, and some later argument must
+        # resolve to this exact file. A shell whose command line merely
+        # mentions the name satisfies neither.
+        if 'python' not in os.path.basename(argv[0]):
+            continue
+        if not any(os.path.realpath(a) == script for a in argv[1:] if a and not a.startswith('-')):
+            continue
+
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+
+
+def _set_app_identity(app):
+    """Make the dock/taskbar show the right icon and name.
+
+    Under Wayland, GNOME matches a window to its .desktop file by the surface's
+    `app_id`, which Qt takes from QGuiApplication::desktopFileName(). The
+    StartupWMClass hint in the .desktop file is an X11-ONLY mechanism and is
+    ignored entirely — which is why this app lost its dock icon when the
+    session moved to Wayland, and why the fix is here rather than in the
+    .desktop file.
+
+    The name must match the installed .desktop basename exactly:
+    loq-control.desktop.
+    """
+    app.setApplicationName('LOQ Control')
+    app.setApplicationDisplayName('LOQ Control')
+    app.setOrganizationName('ojee')
+    app.setDesktopFileName('loq-control')
+    app.setWindowIcon(_build_icon())
 
 
 if __name__ == '__main__':
     _kill_existing()
+
+    # Qt5 on Wayland falls back to QtWayland's own client-side decoration
+    # plugin ("bradient"), which paints a pale titlebar and border that ignore
+    # the app stylesheet — the white frame that made this stop looking like a
+    # Linux app. Running under XWayland hands decoration back to the
+    # compositor, so the window gets real Zorin/Adwaita chrome again.
+    #
+    # Override with OJEE_QPA=wayland to test the native path.
+    if os.environ.get('OJEE_QPA'):
+        os.environ['QT_QPA_PLATFORM'] = os.environ['OJEE_QPA']
+    elif os.environ.get('XDG_SESSION_TYPE') == 'wayland' and not os.environ.get('QT_QPA_PLATFORM'):
+        os.environ['QT_QPA_PLATFORM'] = 'xcb'
+
     app = QApplication(sys.argv)
+    _set_app_identity(app)
     app.setStyleSheet(MSG_STYLE)
     win = LOQControl()
     if '--minimized' not in sys.argv:
