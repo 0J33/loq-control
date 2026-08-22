@@ -1378,6 +1378,14 @@ body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top));
 .flex { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
 .stack { display: flex; flex-direction: column; gap: var(--s-3); }
 
+/* ---------- view strip (mobile only) ---------- */
+/* The bottom tab bar carries one entry per MODULE, and .nav-links — where a
+   module's own views live — is hidden below 860px. Together that left every
+   view except a module's FIRST one unreachable on a phone: LOQ's Battery,
+   Home's Devices/Scenes/Automations/Activity. This strip is the missing
+   level — the ACTIVE module's views, scrollable, under the nav. */
+.viewstrip { display: none; }
+
 /* ============================================================
    RESPONSIVE
    ============================================================ */
@@ -1412,6 +1420,37 @@ body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top));
      last card on a phone with an indicator, and too little on one with a
      taller one. */
   .wrap { padding: var(--s-3) var(--s-3) calc(69px + env(safe-area-inset-bottom)); }
+
+  .viewstrip {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: var(--chrome-2);
+    border-bottom: 1px solid var(--line);
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+    /* Sticks under the nav, which sits under the hudbar: 30 + 56. */
+    position: sticky;
+    top: calc(86px + env(safe-area-inset-top));
+    z-index: var(--z-nav);
+  }
+  .viewstrip::-webkit-scrollbar { display: none; }
+  .viewstrip a {
+    flex: none;
+    min-height: var(--hit);
+    display: inline-flex; align-items: center;
+    padding: 0 14px;
+    border-bottom: 2px solid transparent;
+    color: var(--dim);
+    font-family: var(--mono); font-size: 0.6rem; font-weight: 900;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    white-space: nowrap; text-decoration: none;
+  }
+  .viewstrip a.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .viewstrip a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* One view is not a choice; a strip of one is noise. */
+  .viewstrip[data-single="1"] { display: none; }
 }
 
 @media (max-width: 700px) {

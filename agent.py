@@ -515,11 +515,22 @@ MANIFEST = {
     'id': 'loq',
     'name': 'LOQ',
     'version': '1.0.0',
+    # Monitor and Battery only. The browser module READS this machine; it does
+    # not drive it.
+    #
+    # Three surfaces — the Qt app, the browser on a desktop, the browser on a
+    # phone — had drifted into three different subsets of the same controls,
+    # which is worse than one surface having them and one not. Controls live
+    # in the desktop app, where a human is sitting at the machine. That also
+    # means the auto-revert, the confirm dialogs and the privileged write
+    # paths no longer need to be reachable over the tailnet at all.
+    #
+    # /api/control, /api/revert and /api/kill still EXIST — the desktop app
+    # and any future client use them, and they stay gated by the token and by
+    # LOQ_ALLOW_ADVANCED. The web UI simply stops calling them.
     'views': [
         {'id': 'monitor', 'label': 'Monitor', 'icon': 'i-gauge'},
-        {'id': 'power', 'label': 'Power', 'icon': 'i-power'},
         {'id': 'battery', 'label': 'Battery', 'icon': 'i-temp'},
-        {'id': 'system', 'label': 'System', 'icon': 'i-grid'},
     ],
     'ui': '/ui/index.js',
     'health': '/api/health',
