@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<!--
+  ojee-ui standalone module shell — TEMPLATE.
+
+  A module mounted in ojee-console gets its chrome from the console. Run on
+  its own, it needs a shell of its own, and this is it: a complete one, in one
+  file, that works for ANY module implementing the contract.
+
+  It reads the module's own /module.json, builds nav from its views, and
+  mounts /ui/index.js through the same ModuleHost the console uses. Nothing in
+  here is module-specific, so a module vendors it unchanged:
+
+      cp node_modules/ojee-ui/standalone.html  public/index.html
+      cp node_modules/ojee-ui/ojee-ui.css      public/
+      cp node_modules/ojee-ui/chrome.js        public/
+
+  Then serve public/ from the module's own server and set the two <meta>
+  values below. That is the entire standalone story — which matters, because
+  a "runs standalone" claim that requires bespoke work per module is a claim
+  that quietly stops being true.
+
+  What this shell deliberately does NOT do is authenticate. A module is
+  tailnet-only and single-purpose; the console owns auth. If you expose a
+  module beyond a tailnet, put a real gate in front of it.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#08080e">
+
+<!-- Set these two per module. -->
+<meta name="ojee-module-base" content="">
+<meta name="ojee-module-title" content="LOQ">
+
+<title>LOQ · hardware control</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;700;900&family=Major+Mono+Display&display=swap" rel="stylesheet">
+<style>
+@font-face {
+  font-family: 'Departure Mono';
+  src: url('https://cdn.jsdelivr.net/gh/rektdeckard/departure-mono@main/public/assets/DepartureMono-Regular.woff2') format('woff2');
+  font-display: swap;
+}
+</style>
+
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="ojee-ui.css">
+<!-- Optional branding overlay. Delete if you use the default theme. -->
+<link id="theme-link" rel="stylesheet" href="">
+</head>
+<body class="app grid-bg">
+
+<!--
+  Shared icon sprite. A module appends its own <symbol>s here on mount; these
+  are the ones the shell itself references.
+-->
+<svg class="sprite" id="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-grid" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3zM12 9v5M12 17h.01"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><path d="M4 4h16M4 9h16M4 14h10M4 19h7"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 18a8 8 0 1 1 16 0M12 18l4-5"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9M7.5 6.2a7.5 7.5 0 1 0 9 0"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-1.5 5.5M20 5v6h-6"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="hudbar">
+  <span class="seg seg--accent seg--live"><b id="hud-state">booting</b></span>
+  <span class="seg hide-sm">mode <b>standalone</b></span>
+  <span class="seg hide-sm">version <b id="hud-version">–</b></span>
+  <span class="seg right">local <b id="hud-clock">--:--:--</b></span>
+</div>
+
+<nav class="nav" aria-label="Primary">
+  <span class="nav-logo" id="nav-logo">module</span>
+  <div class="nav-links" id="nav-links"></div>
+</nav>
+
+<main class="wrap" id="main"><div id="view"></div></main>
+
+<nav class="tabbar" id="tabbar" aria-label="Views"></nav>
+
+<div class="statusbar">
+  <span class="ok" id="sb-conn">standalone</span>
+  <span class="hide-sm" id="sb-note">no console attached</span>
+  <span class="right" id="sb-updated">—</span>
+</div>
+
+<div id="modal-root"></div>
+<div class="toast-stack" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script type="module">
+import { ModuleHost, clock, esc, icon, onRoute, toast } from './chrome.js';
+
+const $ = (s) => document.querySelector(s);
+const meta = (n) => document.querySelector(`meta[name="${n}"]`)?.content || '';
+
+// '' when the module is served from its own root — which is the whole point:
+// the module's own code never knows or cares which it is.
+const BASE = meta('ojee-module-base').replace(/\/+$/, '');
+
+const host = new ModuleHost({ el: $('#view'), base: BASE });
+let manifest = null;
+
+clock($('#hud-clock'));
+
+function renderNav(active) {
+  const views = manifest?.views || [];
+  $('#nav-links').innerHTML = views.map((v) => `
+    <a class="nav-link${v.id === active ? ' active' : ''}" href="#/${esc(v.id)}">${esc(v.label)}</a>`).join('');
+  $('#tabbar').innerHTML = views.slice(0, 5).map((v) => `
+    <button class="tabitem${v.id === active ? ' active' : ''}" data-goto="${esc(v.id)}">
+      ${icon(v.icon || 'i-grid', 'ic ic--lg')}<span>${esc(v.label)}</span>
+    </button>`).join('');
+  $('#tabbar').querySelectorAll('.tabitem').forEach((b) => {
+    b.addEventListener('click', () => { location.hash = `#/${b.dataset.goto}`; });
+  });
+}
+
+async function boot() {
+  try {
+    manifest = await (await fetch(`${BASE}/module.json`)).json();
+  } catch (e) {
+    host.error('Cannot read module.json', e.message, { retry: false });
+    $('#hud-state').textContent = 'error';
+    return;
+  }
+
+  const title = meta('ojee-module-title') || manifest.name || manifest.id;
+  document.title = title;
+  $('#nav-logo').textContent = title;
+  $('#hud-version').textContent = manifest.version || '–';
+  $('#hud-state').textContent = 'standalone';
+
+  // Health is advisory here: a standalone module still renders its UI so you
+  // can see WHY it is unhappy. Hiding the UI when the hardware is unplugged
+  // would remove the only screen that could tell you.
+  try {
+    const h = await (await fetch(`${BASE}${manifest.health || '/api/health'}`)).json();
+    if (h && h.ok === false) {
+      $('#sb-conn').textContent = h.reason || 'degraded';
+      $('#sb-conn').classList.add('warn');
+      toast('warn', 'Module degraded', h.reason || '');
+    }
+  } catch { /* the mount below will surface it */ }
+
+  const uiUrl = `${BASE}${manifest.ui || '/ui/index.js'}${manifest.version ? `?v=${encodeURIComponent(manifest.version)}` : ''}`;
+  let mounted = false;
+
+  onRoute(async ({ a }) => {
+    const views = manifest.views || [];
+    const view = views.some((v) => v.id === a) ? a : (views[0]?.id || null);
+    renderNav(view);
+    $('#sb-updated').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
+
+    if (!mounted) {
+      try {
+        await host.mount(manifest, view, uiUrl);
+        mounted = true;
+      } catch {
+        // host.mount already rendered the failure; wire its retry.
+        const btn = $('#view [data-retry]');
+        btn?.addEventListener('click', () => location.reload());
+      }
+      return;
+    }
+    // Switching views must not remount — that would drop the module's stream.
+    await host.setView(view, uiUrl);
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

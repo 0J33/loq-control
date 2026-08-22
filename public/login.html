@@ -1,0 +1,81 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex, nofollow">
+<title>LOQ · sign in</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;700;900&family=Major+Mono+Display&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/ojee-ui.css">
+
+<style>
+  /* The gate is the only page this module styles itself — everything past it
+     is the shared shell. Kept deliberately small. */
+  .gatewrap { min-height: 100dvh; display: grid; place-items: center; padding: var(--s-4); }
+  .gatebox { width: min(420px, 100%); }
+  .gatebox form { display: flex; flex-direction: column; gap: var(--s-3); margin-top: var(--s-4); }
+  .gatebox .btn { width: 100%; justify-content: center; }
+  .gatenote { margin-top: var(--s-4); font-size: 0.62rem; line-height: 1.7; color: var(--dim); }
+  .gatenote code { color: var(--ink-2); }
+</style>
+
+<div class="gatewrap">
+  <main class="gatebox panel panel--glowtop stack">
+    <div class="titleblock">
+      <h1 class="h2">LOQ</h1>
+      <p class="meta">hardware control agent</p>
+    </div>
+
+    <div class="alert alert--info" role="status">
+      This agent is reachable only from the tailnet. The token is the one set as
+      <code>LOQ_TOKEN</code> on the service.
+    </div>
+
+    <form id="f" autocomplete="off">
+      <label class="field">
+        <span class="label">agent token</span>
+        <input class="input" type="password" id="tok" name="token" required
+               autocomplete="current-password" autofocus
+               aria-describedby="err">
+      </label>
+      <p class="alert alert--err" id="err" role="alert" hidden></p>
+      <button class="btn" type="submit" id="go">SIGN IN</button>
+    </form>
+
+    <p class="gatenote">
+      Signing in stores an <code>HttpOnly</code> cookie for 30 days. Rotating
+      <code>LOQ_TOKEN</code> invalidates every cookie immediately, because the
+      cookie is derived from the token rather than stored server-side.
+    </p>
+  </main>
+</div>
+
+<script type="module">
+  const f = document.getElementById('f');
+  const err = document.getElementById('err');
+  const go = document.getElementById('go');
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.hidden = true;
+    go.disabled = true;
+    go.textContent = 'CHECKING…';
+    try {
+      const res = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: document.getElementById('tok').value }),
+      });
+      if (!res.ok) throw new Error('That token was not accepted.');
+      location.replace('/');
+    } catch (e2) {
+      // Say what happened, not "an error occurred".
+      err.textContent = e2.message;
+      err.hidden = false;
+      go.disabled = false;
+      go.textContent = 'SIGN IN';
+      document.getElementById('tok').select();
+    }
+  });
+</script>

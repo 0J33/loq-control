@@ -1,0 +1,101 @@
+/* ============================================================
+   ojee-ui theme — PAPER
+   Light mode. Exists mostly to prove the system is not
+   hardcoded dark: every rule in ojee-ui.css resolves through
+   tokens, so inverting the surface ramp is enough. Load after
+   ojee-ui.css.
+
+   Two things flip meaning in a light theme and are easy to miss:
+
+   1. --panel is a lift on dark and a SHADE on light. Here it is
+      black-at-3% rather than white-at-2%, so a panel still reads
+      as a distinct surface.
+   2. --line-strong must be DARKER than the surfaces, and its
+      worst case is the darkest surface (--panel), not the
+      lightest. #868279 measures 3.51 (bg) / 3.83 (bg-2) /
+      3.30 (panel) — all clear the 3:1 non-text floor.
+
+   Measured 2026-08-21: ink 16.94:1 · ink-2 8.49 · dim 6.20 ·
+   accent 5.57 · on-accent on accent 6.08 · ok 6.49 · warn 4.51 ·
+   err 5.99 · info 6.15. All pass.
+
+   Note the glows: on a light surface a coloured halo reads as a
+   smudge, so they are dialled well down rather than reused at
+   dark-theme strength.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  --bg-0: #f9f8f5;
+  --bg-1: #f2f1ec;
+  --bg:   #f6f5f1;
+  --bg-2: #ffffff;
+
+  --accent:      #006d77;
+  --on-accent:   #ffffff;
+  --accent-08:   rgba(0, 109, 119, 0.08);
+  --accent-03:   rgba(0, 109, 119, 0.04);
+  --glow:        rgba(0, 109, 119, 0.22);
+  --glow-soft:   rgba(0, 109, 119, 0.16);
+  --glow-mid:    rgba(0, 109, 119, 0.14);
+  --glow-faint:  rgba(0, 109, 119, 0.06);
+  --glow-strong: rgba(0, 109, 119, 0.30);
+
+  --ink:    #141318;
+  --ink-2:  #4a4740;
+  --dim:    #5f5b52;
+  --ink-hi: #000000;
+
+  --line:        rgba(20, 19, 24, 0.12);
+  --line-2:      #e4e2db;
+  --line-strong: #868279;
+  --line-hover:  #b8b4aa;
+
+  /* A shade, not a lift — see the header note. */
+  --panel:  rgba(0, 0, 0, 0.03);
+  --tint-1: rgba(20, 19, 24, 0.02);
+  --tint-2: rgba(20, 19, 24, 0.04);
+  --tint-3: rgba(20, 19, 24, 0.20);
+  /* Dark dot — the pale default is invisible on a light ground. */
+  --dot-grid: rgba(20, 19, 24, 0.07);
+
+  --chrome:   rgba(246, 245, 241, 0.90);
+  --chrome-2: rgba(246, 245, 241, 0.92);
+  --chrome-3: rgba(246, 245, 241, 0.97);
+  --chrome-4: rgba(255, 255, 255, 0.80);
+  --scrim:    rgba(20, 19, 24, 0.45);
+
+  --ok:   #3f6212;
+  --warn: #8a6d00;
+  --err:  #b3261e;
+  --info: #005f9e;
+  --err-line: rgba(179, 38, 30, 0.40);
+  --err-wash: rgba(179, 38, 30, 0.05);
+  --glow-ok:   rgba(63, 98, 18, 0.20);
+  --glow-warn: rgba(138, 109, 0, 0.20);
+  --glow-err:  rgba(179, 38, 30, 0.20);
+
+  --chart-1: #006d77;
+  --chart-2: #8a6d00;
+  --chart-3: #005f9e;
+  --chart-4: #3f6212;
+  --chart-5: #6d28d9;
+  --chart-6: #b45309;
+  --chart-7: #9d174d;
+  --chart-8: #0f766e;
+
+  /* Cold-to-hot on light. The ramp runs the opposite direction from
+     a dark theme — cells get DARKER as they heat up — so the label
+     ink flips partway: black on the pale mid cells, white on the
+     dark hot one. That is exactly what --cell-ink / --cell-hot-ink
+     exist for, and it is why this theme still needs no rule
+     overrides. Measured: 12.27 / 7.33 / 6.08. */
+  --cell-0:       #e4e2db;
+  --cell-0-ink:   #4a4740;
+  --cell-1:       #7fd4d4;
+  --cell-2:       #2fa8ae;
+  --cell-3:       var(--accent);
+  --cell-ink:     #000000;
+  --cell-hot-ink: #ffffff;
+}

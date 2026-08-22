@@ -1,0 +1,161 @@
+/* ============================================================
+   ojee-loq — module styles.
+   Every value resolves to an ojee-ui token; the module owns its
+   layout and nothing else. The desktop app generates its Qt
+   palette from these same tokens (theme.py), which is what stops
+   the two surfaces drifting apart again.
+   ============================================================ */
+
+.lq { display: flex; flex-direction: column; gap: var(--s-3); }
+
+/* ---------- readouts ---------- */
+/* Tabular figures everywhere a number changes in place. Proportional digits
+   re-flow the row on every tick — the old Qt app visibly jittered as 9 became
+   10 — and a readout that dances is harder to read than one that is still. */
+.lq-num,
+.lq .value,
+.lq .num,
+.lq-cell,
+.lq-proc td { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+
+.lq-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 2px; }
+
+.lq-stat {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 11px 13px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  min-width: 0;
+}
+.lq-stat .lq-k {
+  font-size: 0.6rem; font-weight: 900; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--dim); white-space: nowrap;
+}
+.lq-stat .lq-v {
+  font-family: var(--mono); font-size: 1.15rem; font-weight: 700;
+  color: var(--ink); line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.lq-stat .lq-u { font-size: 0.7rem; color: var(--ink-2); font-weight: 400; }
+.lq-stat .lq-sub { font-size: 0.62rem; color: var(--dim); white-space: nowrap;
+                   overflow: hidden; text-overflow: ellipsis; }
+/* Heat is reinforcement only — the number is right there and says 97. */
+.lq-stat[data-heat="warn"] .lq-v { color: var(--warn); }
+.lq-stat[data-heat="hot"]  .lq-v { color: var(--err); }
+
+/* ---------- core grid ---------- */
+.lq-cores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(30px, 1fr));
+  gap: 2px;
+}
+.lq-cell {
+  aspect-ratio: 1; display: grid; place-items: center;
+  font-family: var(--mono); font-size: 0.56rem; font-weight: 700;
+  background: var(--cell-0); color: var(--cell-0-ink);
+  border: 1px solid var(--line-2);
+  transition: background var(--dur) linear, color var(--dur) linear;
+}
+.lq-cell[data-load="1"] { background: var(--cell-1); color: var(--cell-ink); }
+.lq-cell[data-load="2"] { background: var(--cell-2); color: var(--cell-ink); }
+.lq-cell[data-load="3"] { background: var(--cell-3); color: var(--cell-hot-ink); }
+
+/* ---------- sparklines ---------- */
+.lq-spark { display: block; width: 100%; height: 46px; }
+.lq-sparkwrap {
+  padding: 10px 12px 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+}
+.lq-sparkhead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.lq-sparkhead .lq-v { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- control rows ---------- */
+.lq-ctl {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-3);
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+}
+.lq-ctl + .lq-ctl { border-top: none; }
+.lq-ctl-txt { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lq-ctl-name { font-size: 0.72rem; font-weight: 900; letter-spacing: 0.1em;
+               text-transform: uppercase; color: var(--ink); }
+.lq-ctl-why { font-size: 0.64rem; color: var(--dim); }
+.lq-ctl-act { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.lq-ctl[data-adv="1"] { border-left: 2px solid var(--warn); }
+
+/* A slider plus its committed value. The value is OUTSIDE the input so it
+   still reads correctly while dragging, when the input's own value has moved
+   but nothing has been sent. */
+.lq-slider { display: flex; align-items: center; gap: 10px; min-width: 210px; }
+.lq-slider input[type="range"] { flex: 1 1 auto; min-width: 120px; }
+.lq-slider .lq-live {
+  font-family: var(--mono); font-size: 0.78rem; font-weight: 700;
+  color: var(--accent); min-width: 4.5ch; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lq-slider.is-dirty .lq-live { color: var(--warn); }
+
+/* ---------- pending / auto-revert ---------- */
+.lq-pending {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-3);
+  padding: 12px 14px;
+  background: var(--err-wash);
+  border: 1px solid var(--warn);
+}
+.lq-pending .lq-count {
+  font-family: var(--mono); font-size: 1.1rem; font-weight: 700; color: var(--warn);
+  font-variant-numeric: tabular-nums; min-width: 4ch;
+}
+.lq-pending-txt { flex: 1 1 220px; min-width: 0; }
+.lq-pending .lq-acts { display: flex; gap: 8px; margin-left: auto; }
+
+/* ---------- process table ---------- */
+.lq-proc-bar { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.lq-proc-bar .input { flex: 1 1 200px; min-width: 0; }
+.lq-proc-count { font-size: 0.64rem; color: var(--dim); white-space: nowrap; }
+
+.lq-proc-wrap { max-height: 420px; overflow: auto; border: 1px solid var(--line-2); }
+.lq-proc { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.68rem; }
+.lq-proc thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--chrome-2); color: var(--dim);
+  text-align: left; padding: 8px 10px;
+  font-size: 0.58rem; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase;
+  border-bottom: 1px solid var(--line-strong);
+}
+.lq-proc td { padding: 6px 10px; border-bottom: 1px solid var(--line-2); color: var(--ink-2); }
+.lq-proc tbody tr:hover td { background: var(--accent-03); color: var(--ink); }
+.lq-proc .lq-p-name { color: var(--ink); font-weight: 700; }
+.lq-proc .lq-p-cmd {
+  color: var(--dim); font-size: 0.62rem;
+  max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lq-proc td.lq-r { text-align: right; }
+/* Not-ours rows are dimmed AND their kill button is absent with a reason in
+   the title — never colour alone. */
+.lq-proc tr[data-own="0"] { opacity: 0.5; }
+.lq-proc .lq-p-lock { color: var(--dim); font-size: 0.6rem; }
+
+/* ---------- misc ---------- */
+.lq-list { display: flex; flex-direction: column; gap: 2px; }
+.lq-row {
+  display: flex; align-items: center; gap: var(--s-3);
+  padding: 9px 13px; background: var(--panel); border: 1px solid var(--line-2);
+}
+.lq-row .lq-row-k { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em;
+                    text-transform: uppercase; color: var(--ink); }
+.lq-row .lq-row-v { margin-left: auto; font-family: var(--mono); font-size: 0.7rem;
+                    color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.lq-off { display: flex; gap: 10px; align-items: center; padding: 12px 14px;
+          background: var(--panel); border: 1px dashed var(--line-strong); }
+.lq-off .lq-off-txt { font-size: 0.66rem; color: var(--dim); }
+
+@media (max-width: 700px) {
+  .lq-ctl-act { margin-left: 0; width: 100%; }
+  .lq-slider { width: 100%; }
+  .lq-proc .lq-p-cmd, .lq-proc .lq-c-user { display: none; }
+  .lq-proc-wrap { max-height: 60vh; }
+}

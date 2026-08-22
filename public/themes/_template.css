@@ -1,0 +1,208 @@
+/* ============================================================
+   ojee-ui theme template
+   ------------------------------------------------------------
+   Copy this file, rename it, fill it in, and load it AFTER
+   ojee-ui.css:
+
+       <link rel="stylesheet" href="ojee-ui.css">
+       <link rel="stylesheet" href="themes/my-brand.css">
+
+   A theme redefines TOKENS ONLY. If you find yourself writing a
+   selector other than :root here, the design system is missing a
+   token — open an issue rather than overriding a rule, because a
+   rule override will break on the next version.
+
+   Every token below has a default in ojee-ui.css, so you can
+   delete any line you do not want to change. The ones marked
+   REQUIRED are the ones that actually make it look like your
+   brand rather than like ojee.
+
+   CONTRAST IS YOUR JOB. The defaults are measured against WCAG
+   2.2 AA. If you change --bg or the ink ramp, re-run the checker:
+
+       npm run check:contrast -- themes/my-brand.css
+
+   ============================================================ */
+
+:root {
+  /* ---- REQUIRED: surfaces ---------------------------------------
+     bg-0 and bg-1 are the two stops of the page backdrop gradient;
+     make them close together or the gradient becomes a feature.
+     bg is the nominal page colour — the checker measures ink
+     against THIS value, so keep it between bg-0 and bg-1. */
+  --bg-0: #06060a;
+  --bg-1: #0a0a10;
+  --bg:   #08080e;
+  /* Lifted surface for modals, toasts, select menus. */
+  --bg-2: #0e0e15;
+
+  /* ---- REQUIRED: accent ------------------------------------------
+     The single accent. Used for focus rings, active states, primary
+     buttons, live indicators and chart series 1. One accent is the
+     whole point of the system — resist adding a second.
+
+     Must reach 4.5:1 against --bg (it is used as text) AND have a
+     legible --on-accent (it is used as a background). */
+  --accent: #00ffff;
+
+  /* Text placed ON the accent — buttons, checked boxes, hot cells.
+     Pick whichever of black/white scores higher against --accent. */
+  --on-accent: #000000;
+
+  /* Accent at low opacity. Keep these in the same hue as --accent
+     or hover states will tint the wrong colour. */
+  --accent-08: rgba(0, 255, 255, 0.08);
+  --accent-03: rgba(0, 255, 255, 0.03);
+
+  /* Accent glows — the halo under active elements. Same hue again. */
+  --glow:        rgba(0, 255, 255, 0.50);
+  --glow-soft:   rgba(0, 255, 255, 0.40);
+  --glow-mid:    rgba(0, 255, 255, 0.15);
+  --glow-faint:  rgba(0, 255, 255, 0.08);
+  --glow-strong: rgba(0, 255, 255, 0.55);
+
+  /* ---- REQUIRED: ink ramp ----------------------------------------
+     Three steps, brightest to dimmest. All three are used for TEXT,
+     so all three need 4.5:1 against --bg. The defaults measure
+     15.99 / 8.11 / 5.38.
+       ink    body copy, values, primary labels
+       ink-2  secondary copy, table cells, toast body
+       dim    micro-type: .label, .meta, placeholders, axis ticks */
+  --ink:    #e8e6df;
+  --ink-2:  #a8a59c;
+  --dim:    #8a8478;
+  /* Hover-brightened row text. */
+  --ink-hi: #ffffff;
+
+  /* ---- lines -------------------------------------------------------
+     Two jobs, do not merge them:
+
+       line / line-2   DECORATIVE hairlines — panel edges, table
+                       rules, dotted leaders. Deliberately faint.
+                       No contrast requirement; they are not the
+                       thing that tells you anything.
+
+       line-strong     CONTROL BOUNDARIES — inputs, selects,
+                       toggles, checkboxes, segmented controls,
+                       steppers, icon buttons. The border IS the
+                       affordance, so this one MUST reach 3:1
+                       against every surface it sits on: --bg,
+                       --bg-2 and --panel. The default measures
+                       3.34 / 3.22 / 3.24.
+
+       line-hover      the lift on a hovered panel or row. */
+  --line:        rgba(216, 222, 236, 0.10);
+  --line-2:      #131319;
+  --line-strong: #606370;
+  --line-hover:  #2c2f38;
+
+  /* ---- translucent fills -------------------------------------------
+     panel sits on content. tint-1/2/3 are neutral lifts used by
+     chrome: title bars, table headers, window dots. */
+  --panel:  rgba(255, 255, 255, 0.02);
+  --tint-1: rgba(216, 222, 236, 0.02);
+  --tint-2: rgba(216, 222, 236, 0.03);
+  --tint-3: rgba(216, 222, 236, 0.18);
+  /* The dot of the .grid-bg drafting surface. A LIGHT theme needs a
+     DARK dot — reuse the default here and the grid disappears. */
+  --dot-grid: rgba(216, 222, 236, 0.06);
+
+  /* ---- chrome ------------------------------------------------------
+     Same hue as --bg at four opacities, so a blurred bar over
+     scrolling content still reads as one surface. If you change
+     --bg, change all four to match or the bars will look grafted on.
+       chrome    nav, status bar
+       chrome-2  hud strip
+       chrome-3  mobile tab bar (most opaque — content scrolls under it)
+       chrome-4  window / browser frame bodies
+       scrim     modal backdrop; 40-60% black minimum for legibility */
+  --chrome:   rgba(8, 8, 14, 0.90);
+  --chrome-2: rgba(8, 8, 14, 0.92);
+  --chrome-3: rgba(8, 8, 14, 0.96);
+  --chrome-4: rgba(8, 8, 14, 0.75);
+  --scrim:    rgba(0, 0, 0, 0.72);
+
+  /* ---- status ------------------------------------------------------
+     Used as text and as indicator fills. Never the ONLY signal —
+     every component that uses these also carries an icon or a word.
+     4.5:1 against --bg wherever they appear as text. */
+  --ok:   #88aa44;
+  --warn: #ffd700;
+  --err:  #ff0000;
+  --info: #88ccff;
+  --err-line: rgba(255, 0, 0, 0.35);
+  --err-wash: rgba(255, 0, 0, 0.03);
+  --glow-ok:   rgba(136, 170, 68, 0.40);
+  --glow-warn: rgba(255, 215, 0, 0.40);
+  --glow-err:  rgba(255, 0, 0, 0.40);
+
+  /* ---- data series --------------------------------------------------
+     Eight-step categorical palette for multi-metric charts.
+     chart-1 should equal --accent: the primary series and the
+     accent are the same idea. Distinguishable without colour is
+     handled by the components (legends, direct labels), but avoid
+     putting a red and a green adjacent in the ramp. */
+  --chart-1: #00ffff;
+  --chart-2: #ffd700;
+  --chart-3: #88ccff;
+  --chart-4: #44bbaa;
+  --chart-5: #cc99ff;
+  --chart-6: #dd9944;
+  --chart-7: #ffaacc;
+  --chart-8: #88aa44;
+
+  /* ---- heatmap ramp --------------------------------------------------
+     Four steps for .coregrid, cold to hot. Each cell shows a number,
+     so colour is a second encoding — but the NUMBER still has to be
+     readable. All four label pairings need 4.5:1:
+       --cell-0-ink   on --cell-0
+       --cell-ink     on --cell-1 and --cell-2
+       --cell-hot-ink on --cell-3
+     On a dark theme the ink tokens can just inherit --on-accent. On a
+     light theme the ramp runs the other way — cells get darker as
+     they heat — so --cell-hot-ink usually has to flip to white. */
+  --cell-0:       #191922;
+  --cell-0-ink:   #9b958a;
+  --cell-1:       #0a8f8f;
+  --cell-2:       #00bdbd;
+  --cell-3:       var(--accent);
+  --cell-ink:     var(--on-accent);
+  --cell-hot-ink: var(--on-accent);
+
+  /* ---- type ----------------------------------------------------------
+     Three faces. mono carries everything; pixel is the wordmark
+     only; hud is the small-caps instrument face.
+     If you only change one thing, change --mono.
+     Always keep a real fallback stack — a theme that only names a
+     webfont renders in Times when the font fails to load. */
+  --mono:  'Geist Mono', ui-monospace, Menlo, monospace;
+  --pixel: 'Major Mono Display', ui-monospace, monospace;
+  --hud:   'Departure Mono', 'Geist Mono', ui-monospace, monospace;
+
+  /* ---- space ----------------------------------------------------------
+     A 4/8px rhythm. Scale all six together or the vertical rhythm
+     breaks; do not cherry-pick one step. */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 16px;  --s-4: 24px;  --s-5: 40px;  --s-6: 64px;
+
+  /* ---- motion -----------------------------------------------------------
+     One duration for state changes, one for instant feedback.
+     Both are forced to ~0 under prefers-reduced-motion by
+     ojee-ui.css, so you do not need to handle that here.
+     Keep --dur in the 150-300ms band; above ~400ms the UI feels
+     like it is thinking rather than responding. */
+  --dur:   0.3s;
+  --dur-2: 0.15s;
+  --t: all var(--dur);
+
+  /* ---- ergonomics ---------------------------------------------------------
+     Minimum comfortable touch target. Controls keep their drawn size
+     and grow an invisible hit area to this, so raising it does not
+     make the UI bigger — it makes it easier to hit. Do not go below
+     44px: that is the floor on both major mobile platforms. */
+  --hit: 44px;
+
+  /* ---- stacking ------------------------------------------------------------
+     Only change these if you are compositing ojee-ui inside a host
+     app that already owns a z-index scale. */
+  --z-nav: 50;  --z-hud: 60;  --z-tabbar: 80;  --z-modal: 300;  --z-toast: 1000;
+}

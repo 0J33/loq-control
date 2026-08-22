@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# ojee-loq — the ONLY thing this project is granted passwordless root for.
+#
+# Why a helper script instead of sudoers entries per command: the writes this
+# agent needs are `tee` into sysfs and a couple of vendor tools. Granting those
+# directly means granting `tee <any path>` (root-owned file overwrite) or
+# `sh -c <any string>` (a root shell). Neither is acceptable for a service
+# reachable by any tailnet peer holding a bearer token.
+#
+# So: one root entry point, a fixed verb list, every argument validated against
+# a pattern before it reaches a device. The sudoers rule names this file and
+# nothing else, and the file is root-owned and not writable by the agent user —
+# otherwise the agent could simply rewrite its own helper.
+#
+# Everything here is intentionally boring. Read it once and you know the full
+# extent of what the token can do.
+
+set -euo pipefail
+
+IDEAPAD=/sys/bus/platform/drivers/ideapad_acpi/VPC2004:00
+KBD=/sys/class/leds/platform::kbd_backlight/brightness
+RAPL=/sys/class/powercap/intel-rapl:0
+PROFILE=/sys/firmware/acpi/platform_profile
+
+die() { echo "loq-privhelper: $*" >&2; exit 1; }
+
+# Refuse to run as anything but root, so a mis-set sudoers rule fails loudly
+# rather than half-working.
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+
+  profile)
+    v="${1:-}"
+    case "$v" in
+      quiet|balanced|balanced-performance|performance) ;;
+      *) die "bad profile: $v" ;;
+    esac
+    [ -w "$PROFILE" ] || die "no platform_profile on this machine"
+    printf '%s\n' "$v" > "$PROFILE"
+    ;;
+
+  conservation|fnlock)
+    v="${1:-}"
+    [ "$v" = 0 ] || [ "$v" = 1 ] || die "expected 0 or 1, got: $v"
+    f=$([ "$verb" = conservation ] && echo conservation_mode || echo fn_lock)
+    [ -w "$IDEAPAD/$f" ] || die "no $f on this machine"
+    printf '%s\n' "$v" > "$IDEAPAD/$f"
+    ;;
+
+  kbdlight)
+    v="${1:-}"
+    case "$v" in 0|1|2) ;; *) die "expected 0, 1 or 2, got: $v" ;; esac
+    [ -w "$KBD" ] || die "no keyboard backlight on this machine"
+    printf '%s\n' "$v" > "$KBD"
+    ;;
+
+  tdp)
+    # Watts, not microwatts — the conversion happens here so a caller cannot
+    # pass a value that looks small and lands enormous.
+    v="${1:-}"
+    [[ "$v" =~ ^[0-9]{1,3}$ ]] || die "expected 1-3 digits of watts, got: $v"
+    [ "$v" -ge 10 ] && [ "$v" -le 250 ] || die "watts out of range 10-250: $v"
+    [ -w "$RAPL/constraint_0_power_limit_uw" ] || die "no RAPL on this machine"
+    printf '%s\n' "$((v * 1000000))" > "$RAPL/constraint_0_power_limit_uw"
+    ;;
+
+  gpuclock|gpumemclock)
+    flag=$([ "$verb" = gpuclock ] && echo -lgc || echo -lmc)
+    reset=$([ "$verb" = gpuclock ] && echo -rgc || echo -rmc)
+    if [ "${1:-}" = reset ]; then
+      exec nvidia-smi "$reset"
+    fi
+    lo="${1:-}"; hi="${2:-}"
+    [[ "$lo" =~ ^[0-9]{2,5}$ ]] || die "bad min clock: $lo"
+    [[ "$hi" =~ ^[0-9]{2,5}$ ]] || die "bad max clock: $hi"
+    [ "$lo" -le "$hi" ] || die "min clock above max: $lo > $hi"
+    exec nvidia-smi "$flag" "$lo,$hi"
+    ;;
+
+  gputgp)
+    # Lenovo WMAE method — nvidia-smi -pl is locked on mobile Blackwell, so the
+    # only route is the EC. The ACPI call string is built HERE from a validated
+    # integer; no caller-supplied text ever reaches /proc/acpi/call.
+    v="${1:-}"
+    [[ "$v" =~ ^[0-9]{2,3}$ ]] || die "bad tgp: $v"
+    [ "$v" -ge 45 ] && [ "$v" -le 100 ] || die "tgp out of range 45-100: $v"
+    modprobe acpi_call 2>/dev/null || true
+    [ -w /proc/acpi/call ] || die "acpi_call unavailable; TGP cannot be set"
+    printf '\\_SB.GZFD.WMAE 0 0x12 {0x00, 0x00, 0x02, 0x02, 0x%02X, 0x00, 0x00, 0x00}\n' "$v" \
+      > /proc/acpi/call
+    ;;
+
+  gpumode)
+    v="${1:-}"
+    case "$v" in hybrid|intel|nvidia) ;; *) die "bad gpu mode: $v" ;; esac
+    command -v prime-select >/dev/null || die "prime-select not installed"
+    exec prime-select "$v"
+    ;;
+
+  raplperms)
+    # RAPL energy_uj is root-only on modern kernels (the PLATYPUS mitigation).
+    # Making the package counters world-readable once at startup lets the agent
+    # sample CPU watts every second WITHOUT sudo — the alternative is forking
+    # a privileged process once a second forever.
+    #
+    # The glob is built here, so a caller cannot chmod a path of its choosing.
+    n=0
+    for f in /sys/class/powercap/intel-rapl:[0-9]*/energy_uj; do
+      [ -e "$f" ] || continue
+      chmod a+r "$f" && n=$((n + 1))
+    done
+    echo "$n"
+    ;;
+
+  fanrpm)
+    # Fan tachometers live in debugfs, which is root-only. Granting the agent
+    # `sudo cat` instead would be a read primitive for every root-owned file
+    # on the box — /etc/shadow included — to save one verb here.
+    f=/sys/kernel/debug/legion/fancurve
+    [ -r "$f" ] || die "legion_laptop fancurve not available"
+    # Only the two lines the caller needs, so this cannot be pointed at
+    # anything else even by accident.
+    grep -E '^[[:space:]]*[12] fanspeed WMI3:' "$f" || true
+    ;;
+
+  capabilities)
+    # Lets the agent report what it can ACTUALLY do without probing as root
+    # from Python. Read-only.
+    printf 'profile=%s\n'      "$([ -w "$PROFILE" ] && echo 1 || echo 0)"
+    printf 'conservation=%s\n' "$([ -w "$IDEAPAD/conservation_mode" ] && echo 1 || echo 0)"
+    printf 'fnlock=%s\n'       "$([ -w "$IDEAPAD/fn_lock" ] && echo 1 || echo 0)"
+    printf 'kbdlight=%s\n'     "$([ -w "$KBD" ] && echo 1 || echo 0)"
+    printf 'tdp=%s\n'          "$([ -w "$RAPL/constraint_0_power_limit_uw" ] && echo 1 || echo 0)"
+    ;;
+
+  *)
+    die "unknown verb: ${verb:-<none>}"
+    ;;
+esac

@@ -1,0 +1,75 @@
+/* ============================================================
+   ojee-ui theme — EMBER
+   Warm black, amber accent. The CRT-phosphor counterpart to the
+   default cool cyan. Load after ojee-ui.css.
+
+   Measured against WCAG 2.2 AA on 2026-08-21 — all pass:
+     ink 16.11:1 · ink-2 8.40:1 · dim 5.79:1 · accent 10.82:1
+     on-accent on accent 11.50:1 · ok 9.03 · warn 14.08 · err 5.77
+     line-strong 3.41 (bg) / 3.27 (bg-2) / 3.30 (panel)
+   ============================================================ */
+
+:root {
+  --bg-0: #0b0805;
+  --bg-1: #100c07;
+  --bg:   #0d0a06;
+  --bg-2: #141009;
+
+  --accent:      #ffb02e;
+  --on-accent:   #000000;
+  --accent-08:   rgba(255, 176, 46, 0.08);
+  --accent-03:   rgba(255, 176, 46, 0.03);
+  --glow:        rgba(255, 176, 46, 0.50);
+  --glow-soft:   rgba(255, 176, 46, 0.40);
+  --glow-mid:    rgba(255, 176, 46, 0.15);
+  --glow-faint:  rgba(255, 176, 46, 0.08);
+  --glow-strong: rgba(255, 176, 46, 0.55);
+
+  --ink:    #f0e7d8;
+  --ink-2:  #b3a892;
+  --dim:    #948a76;
+  --ink-hi: #fffaf0;
+
+  --line:        rgba(240, 231, 216, 0.10);
+  --line-2:      #1a150d;
+  --line-strong: #6b6558;
+  --line-hover:  #38312a;
+
+  --panel:  rgba(255, 255, 255, 0.02);
+  --tint-1: rgba(240, 231, 216, 0.02);
+  --tint-2: rgba(240, 231, 216, 0.03);
+  --tint-3: rgba(240, 231, 216, 0.18);
+  --dot-grid: rgba(240, 231, 216, 0.06);
+
+  --chrome:   rgba(13, 10, 6, 0.90);
+  --chrome-2: rgba(13, 10, 6, 0.92);
+  --chrome-3: rgba(13, 10, 6, 0.96);
+  --chrome-4: rgba(13, 10, 6, 0.75);
+  --scrim:    rgba(0, 0, 0, 0.72);
+
+  --ok:   #9bbb4a;
+  --warn: #ffd700;
+  --err:  #ff4438;
+  --info: #8fc4ff;
+  --err-line: rgba(255, 68, 56, 0.35);
+  --err-wash: rgba(255, 68, 56, 0.04);
+  --glow-ok:   rgba(155, 187, 74, 0.40);
+  --glow-warn: rgba(255, 215, 0, 0.40);
+  --glow-err:  rgba(255, 68, 56, 0.40);
+
+  --chart-1: #ffb02e;
+  --chart-2: #8fc4ff;
+  --chart-3: #9bbb4a;
+  --chart-4: #ff7b54;
+  --chart-5: #c9a0ff;
+  --chart-6: #ffd700;
+  --chart-7: #ff9ec4;
+  --chart-8: #57c7b8;
+
+  /* Amber ramp. Black labels clear 4.5:1 on cell-1 upward. */
+  --cell-0:     #221b12;
+  --cell-0-ink: #a3987f;
+  --cell-1:     #a06a11;
+  --cell-2:     #d99120;
+  --cell-3:     var(--accent);
+}
