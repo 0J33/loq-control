@@ -584,8 +584,19 @@ body.app .statusbar { flex: none; }
 /* Both bars stick, so the nav starts below the hudbar rather than at
    0 — otherwise they occupy the same 30px and the nav renders on top
    of the status strip. */
-body.app .hudbar { position: sticky; top: 0; z-index: var(--z-hud); flex: none; }
-body.app .nav    { position: sticky; top: 30px; z-index: var(--z-nav); flex: none; }
+/* viewport-fit=cover means the page starts UNDER the status bar, so the
+   topmost strip has to pay for it. Without the padding the hudbar's content
+   sits behind the clock and the notch and is simply unreadable.
+   box-sizing is border-box, so the height must grow by the same inset or the
+   30px content row gets squashed to nothing. */
+body.app .hudbar {
+  position: sticky; top: 0; z-index: var(--z-hud); flex: none;
+  padding-top: env(safe-area-inset-top);
+  height: calc(30px + env(safe-area-inset-top));
+}
+/* The nav sticks BELOW it, so its offset has to track the same value — a
+   hardcoded 30px puts the nav back over the strip. */
+body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top)); z-index: var(--z-nav); flex: none; }
 
 .wrap {
   width: 100%;
@@ -1396,7 +1407,11 @@ body.app .nav    { position: sticky; top: 30px; z-index: var(--z-nav); flex: non
      underneath it and its content is already in the hudbar, so drop
      it rather than stack two strips. */
   body.app .statusbar { display: none; }
-  .wrap { padding: var(--s-3) var(--s-3) 110px; }
+  /* Derived, not guessed. The bar is a 56px tab row + 1px border + the
+     home-indicator inset. A flat 110px left ~50px of dead space under the
+     last card on a phone with an indicator, and too little on one with a
+     taller one. */
+  .wrap { padding: var(--s-3) var(--s-3) calc(69px + env(safe-area-inset-bottom)); }
 }
 
 @media (max-width: 700px) {
