@@ -96,6 +96,7 @@ here is available in both.
 - **System Info** — NVIDIA driver, kernel, BIOS versions with update checker
 - **Dark / Light Theme** — Toggle between themes (saved to config)
 - **System Tray Icon** — Minimize to tray with quick profile switching from the context menu
+- **Four views** — Monitor / Power / Battery / System, the same split as the web module, rather than eleven cards in one scroll
 - **Autostart** — Optional start on login (minimized to tray)
 - **Export Specs** — Copy full system specifications to clipboard
 - **Keyboard Shortcuts** — Ctrl+1-4 for profiles, Ctrl+Q to quit, Ctrl+E to export specs
@@ -160,12 +161,16 @@ because a human is sitting at the machine. The **agent** never does this; see
 
 | Shortcut | Action |
 |---|---|
-| Ctrl+1 | Quiet profile |
-| Ctrl+2 | Balanced profile |
-| Ctrl+3 | Balanced Performance profile |
-| Ctrl+4 | Performance profile |
-| Ctrl+E | Export specs to clipboard |
+| Alt+1 … Alt+4 | Switch view — Monitor, Power, Battery, System |
+| Ctrl+1 … Ctrl+4 | Set profile — Quiet, Balanced, Bal-Perf, Performance |
+| Ctrl+P | Open the process manager |
+| Ctrl+E | Copy specifications to the clipboard |
+| Ctrl+/ | Show the shortcuts sheet |
 | Ctrl+Q | Quit |
+
+Views are on Alt and profiles stay on Ctrl. Repointing Ctrl+1…4 at the new
+tabs would have quietly broken muscle memory that this README has documented
+since the first release.
 
 ## The agent
 

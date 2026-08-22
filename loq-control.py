@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
     QFrame, QGridLayout, QSlider, QScrollArea, QMessageBox, QSizePolicy,
     QProgressBar, QSystemTrayIcon, QMenu, QAction, QShortcut,
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
-    QAbstractItemView)
+    QAbstractItemView, QStackedWidget)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen,
                          QKeySequence, QPixmap, QLinearGradient)
@@ -278,9 +278,13 @@ SCROLL_STYLE = f"""
     QScrollBar:vertical {{
         background: {T['BG']}; width: 6px; border: none;
     }}
+    /* Dim by default, accent on hover. A full-height solid accent bar is
+       the brightest thing on screen and it is a scrollbar — it was pulling
+       the eye away from the readouts it sits next to. */
     QScrollBar::handle:vertical {{
-        background: {T['ACCENT']}; border-radius: 0px; min-height: 30px;
+        background: {T['BORDER']}; border-radius: 0px; min-height: 30px;
     }}
+    QScrollBar::handle:vertical:hover {{ background: {T['ACCENT']}; }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0; background: none;
     }}
@@ -294,6 +298,119 @@ SCROLL_STYLE = f"""
 
 
 # ── Custom Widgets ────────────────────────────────────────────────────
+
+class StackedPages(QStackedWidget):
+    """A QStackedWidget that is as tall as its CURRENT page, not its tallest.
+
+    The default takes the maximum size hint across every child, which with
+    tabs means the short pages inherit the tall one's height: Battery would
+    render ~400px of content inside an 1100px scroll region, with a scrollbar
+    offering to scroll through nothing. Giving the hidden pages an Ignored
+    size policy is the standard fix.
+    """
+
+    def addWidget(self, widget):
+        widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        index = super().addWidget(widget)
+        if self.count() == 1:
+            self._adopt(0)
+        return index
+
+    def setCurrentIndex(self, index):
+        super().setCurrentIndex(index)
+        self._adopt(index)
+
+    def _adopt(self, index):
+        for i in range(self.count()):
+            w = self.widget(i)
+            if i == index:
+                w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            else:
+                w.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.updateGeometry()
+
+    def sizeHint(self):
+        w = self.currentWidget()
+        return w.sizeHint() if w else super().sizeHint()
+
+    def minimumSizeHint(self):
+        w = self.currentWidget()
+        return w.minimumSizeHint() if w else super().minimumSizeHint()
+
+
+class NavTabs(QWidget):
+    """The web shell's .nav-link row, as a widget.
+
+    Not a QTabWidget: that paints its own frame and tab shapes from the
+    platform style, which is exactly the native chrome this design system
+    replaces — it would look like a different application bolted on. This is
+    a plain button row with an accent underline on the active one, matching
+    the web module's nav so the two surfaces read as one product.
+    """
+
+    changed = pyqtSignal(int)
+
+    def __init__(self, labels, parent=None):
+        super().__init__(parent)
+        self._buttons = []
+        self._active = 0
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(2)
+
+        for i, text in enumerate(labels):
+            b = QPushButton(text)
+            b.setFont(mkfont(9, bold=True, ls=2.0))
+            b.setCursor(Qt.PointingHandCursor)
+            b.setCheckable(True)
+            # 44px: the same minimum hit area the web design system uses. A
+            # tab you have to aim at is a tab you mis-click.
+            b.setMinimumHeight(44)
+            b.setFocusPolicy(Qt.StrongFocus)
+            b.clicked.connect(lambda _=False, n=i: self.setActive(n))
+            row.addWidget(b)
+            self._buttons.append(b)
+
+        row.addStretch()
+        self._restyle()
+
+    def _restyle(self):
+        for i, b in enumerate(self._buttons):
+            on = i == self._active
+            b.setChecked(on)
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: none;
+                    border-bottom: 2px solid {T['ACCENT'] if on else 'transparent'};
+                    color: {T['ACCENT'] if on else T['TEXT_MUTED']};
+                    padding: 0 16px;
+                    text-align: center;
+                }}
+                QPushButton:hover {{ color: {T['TEXT']}; }}
+                /* A visible focus ring, because the terminal aesthetic
+                   otherwise leans entirely on hover — which does not exist
+                   for keyboard users. */
+                QPushButton:focus {{
+                    border: 1px solid {T['ACCENT']};
+                    border-bottom: 2px solid {T['ACCENT']};
+                    color: {T['TEXT']};
+                }}
+            """)
+
+    def setActive(self, index):
+        index = max(0, min(len(self._buttons) - 1, int(index)))
+        if index == self._active:
+            self._buttons[index].setChecked(True)
+            return
+        self._active = index
+        self._restyle()
+        self.changed.emit(index)
+
+    def active(self):
+        return self._active
+
 
 class GridBackdrop(QWidget):
     """web .grid-bg — the 18px dot-grid surface everything sits on."""
@@ -1271,24 +1388,46 @@ class LOQControl(QWidget):
             f'margin-bottom: 4px; letter-spacing: 2px;')
         root.addWidget(sub)
 
-        g = QGridLayout()
-        g.setSpacing(12)
-        g.setColumnStretch(0, 1)
-        g.setColumnStretch(1, 1)
-        row = 0
-        g.addWidget(self._build_sensors_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_activity_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_temp_graph_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_battery_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_profile_card(), row, 0)
-        g.addWidget(self._build_gpu_mode_card(), row, 1); row += 1
-        g.addWidget(self._build_overclock_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_kbd_card(), row, 0)
-        g.addWidget(self._build_toggles_card(), row, 1); row += 1
-        g.addWidget(self._build_proc_manager_card(), row, 0, 1, 2); row += 1
-        g.addWidget(self._build_updates_card(), row, 0, 1, 2)
+        # Four views instead of eleven stacked cards in one scroll.
+        #
+        # The old layout put sensors, activity, temperatures, battery,
+        # profile, GPU mode, overclock, keyboard, toggles, processes and
+        # updates in a single column, so finding conservation mode meant
+        # scrolling past a live graph every time. These are the same four
+        # views the web module has — Monitor / Power / Battery / System — so
+        # the two surfaces are one mental model rather than two.
+        self.tabs = NavTabs(['MONITOR', 'POWER', 'BATTERY', 'SYSTEM'])
+        root.addWidget(self.tabs)
 
-        root.addLayout(g)
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f'background: {T["BORDER"]}; border: none;')
+        root.addWidget(sep)
+        root.addSpacing(12)
+
+        self.pages = StackedPages()
+        self.pages.setStyleSheet('background: transparent;')
+        for cards in (
+            # MONITOR — what the machine is doing right now.
+            [(self._build_sensors_card(), 2),
+             (self._build_activity_card(), 2),
+             (self._build_temp_graph_card(), 2)],
+            # POWER — the knobs that change how hard it runs.
+            [(self._build_profile_card(), 1),
+             (self._build_gpu_mode_card(), 1),
+             (self._build_overclock_card(), 2)],
+            # BATTERY — charge, health, and the one control that protects it.
+            [(self._build_battery_card(), 2)],
+            # SYSTEM — everything about the machine rather than its load.
+            [(self._build_kbd_card(), 1),
+             (self._build_toggles_card(), 1),
+             (self._build_proc_manager_card(), 2),
+             (self._build_updates_card(), 2)],
+        ):
+            self.pages.addWidget(self._page(cards))
+
+        self.tabs.changed.connect(self.pages.setCurrentIndex)
+        root.addWidget(self.pages)
         root.addStretch()
 
         # web footer: hairline on top, meta left, accent label link right
@@ -1529,6 +1668,41 @@ class LOQControl(QWidget):
         return row, v
 
     # ── card builders ─────────────────────────────────────────────────
+
+    def _page(self, cards):
+        """One tab's worth of cards in a two-column grid.
+
+        `cards` is [(widget, span)] where span is 1 or 2 columns. A span-1
+        card pairs with the next span-1 card on the same row; anything else
+        takes the full width. Keeping the packing here rather than at each
+        call site means a card can move between tabs without its layout
+        travelling with it.
+        """
+        page = QWidget()
+        page.setStyleSheet('background: transparent;')
+        g = QGridLayout(page)
+        g.setSpacing(12)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setColumnStretch(0, 1)
+        g.setColumnStretch(1, 1)
+
+        row, col = 0, 0
+        for widget, span in cards:
+            if span >= 2:
+                if col:                     # close a half-filled row first
+                    row += 1
+                    col = 0
+                g.addWidget(widget, row, 0, 1, 2)
+                row += 1
+            else:
+                g.addWidget(widget, row, col)
+                col += 1
+                if col > 1:
+                    row += 1
+                    col = 0
+
+        g.setRowStretch(row + 1, 1)
+        return page
 
     def _card(self):
         c = QFrame(); c.setStyleSheet(CARD_STYLE)
@@ -3173,14 +3347,105 @@ class LOQControl(QWidget):
 
     # ── keyboard shortcuts ────────────────────────────────────────────
 
+    SHORTCUTS = [
+        ('Alt+1 … Alt+4', 'Switch view — Monitor, Power, Battery, System'),
+        ('Ctrl+1 … Ctrl+4', 'Set profile — Quiet, Balanced, Bal-Perf, Performance'),
+        ('Ctrl+P', 'Open the process manager'),
+        ('Ctrl+E', 'Copy specifications to the clipboard'),
+        ('Ctrl+/', 'Show this sheet'),
+        ('Ctrl+Q', 'Quit'),
+    ]
+
     def _setup_shortcuts(self):
+        # Ctrl+1..4 stays on PROFILES — it is in the README, it is muscle
+        # memory, and silently repointing it at the new tabs would be the
+        # worst possible outcome of adding tabs. Views get Alt instead.
         for i, key in enumerate(
                 ['quiet', 'balanced', 'balanced-performance', 'performance']):
             QShortcut(QKeySequence(f'Ctrl+{i+1}'), self).activated.connect(
                 lambda m=key: self.set_profile(m))
+        for i in range(4):
+            QShortcut(QKeySequence(f'Alt+{i+1}'), self).activated.connect(
+                lambda n=i: self.tabs.setActive(n))
         QShortcut(QKeySequence('Ctrl+Q'), self).activated.connect(self._quit)
         QShortcut(QKeySequence('Ctrl+P'), self).activated.connect(
             self._open_proc_manager)
+        QShortcut(QKeySequence('Ctrl+E'), self).activated.connect(
+            self._export_specs)
+        for seq in ('Ctrl+/', 'Ctrl+?', 'F1'):
+            QShortcut(QKeySequence(seq), self).activated.connect(
+                self._show_shortcuts)
+
+    def _export_specs(self):
+        """Copy a plain-text spec sheet to the clipboard.
+
+        The README has advertised Ctrl+E since the first release and nothing
+        was ever bound to it — pressing it did nothing at all. Implemented
+        rather than removed from the docs, because it is genuinely the thing
+        you want when someone asks what is in the machine.
+        """
+        bat = find_battery()
+        lines = [
+            os.uname().nodename,
+            '',
+            f'CPU      {cpu_model_short()}',
+            f'GPU      {gpu_model_short()}',
+        ]
+
+        _lo, hi = get_rapl_info()
+        if hi:
+            lines.append(f'TDP      {hi} W maximum')
+
+        drives = list_drives()
+        if drives:
+            lines.append('')
+            for d in drives:
+                lines.append(
+                    f'DISK     {d["dev"]:<10} {fmt_bytes(d["size"]):>10}  '
+                    f'{d.get("model") or ""}'.rstrip())
+
+        nics = list_active_nics()
+        if nics:
+            lines.append('')
+            for n in nics:
+                extra = f' ({n["ssid"]})' if n.get('ssid') else ''
+                lines.append(
+                    f'NET      {n["iface"]:<10} {n.get("ip") or "-":<16} '
+                    f'{n["kind"]}{extra}')
+
+        if bat:
+            lines.append('')
+            lines.append(f'BATTERY  {read_sys(f"{bat}/capacity")}%')
+
+        try:
+            with open('/proc/version') as fh:
+                lines.append('')
+                lines.append(f'KERNEL   {fh.read().split()[2]}')
+        except (OSError, IndexError):
+            pass
+
+        text = '\n'.join(lines)
+        QApplication.clipboard().setText(text)
+        QMessageBox.information(
+            self, 'Specifications copied',
+            f'{len(lines)} lines copied to the clipboard.\n\n{text}')
+
+    def _show_shortcuts(self):
+        """A shortcuts sheet, because an undiscoverable shortcut is not a
+        feature — it is a fact only the person who wrote it knows."""
+        rows = '\n'.join(
+            f'<tr>'
+            f'<td style="padding: 4px 18px 4px 0; color: {T["ACCENT"]}; '
+            f'white-space: nowrap;"><b>{k}</b></td>'
+            f'<td style="padding: 4px 0; color: {T["TEXT"]};">{v}</td>'
+            f'</tr>'
+            for k, v in self.SHORTCUTS)
+        box = QMessageBox(self)
+        box.setWindowTitle('Keyboard shortcuts')
+        box.setTextFormat(Qt.RichText)
+        box.setText(f'<table style="font-family: {FONT};">{rows}</table>')
+        box.setStandardButtons(QMessageBox.Close)
+        box.exec_()
 
 
 # ── Entry Point ───────────────────────────────────────────────────────
