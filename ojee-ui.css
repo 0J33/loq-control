@@ -149,6 +149,13 @@
   /* ---- ergonomics -------------------------------------------------
      Minimum comfortable touch target. Controls keep their drawn size
      and grow their HIT area to this, so the dense look survives. */
+  /* Chrome heights. The view strip sticks BELOW both bars, and hardcoding
+     that sum meant it silently broke when the nav shrank at a breakpoint —
+     it floated 8px low across every page. Anything that stacks under the
+     chrome derives from these. */
+  --hud-h: 30px;
+  --nav-h: 56px;
+
   --hit: 44px;
 
   /* ---- z scale ---------------------------------------------------- */
@@ -592,11 +599,11 @@ body.app .statusbar { flex: none; }
 body.app .hudbar {
   position: sticky; top: 0; z-index: var(--z-hud); flex: none;
   padding-top: env(safe-area-inset-top);
-  height: calc(30px + env(safe-area-inset-top));
+  height: calc(var(--hud-h) + env(safe-area-inset-top));
 }
 /* The nav sticks BELOW it, so its offset has to track the same value — a
    hardcoded 30px puts the nav back over the strip. */
-body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top)); z-index: var(--z-nav); flex: none; }
+body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inset-top)); z-index: var(--z-nav); flex: none; }
 
 .wrap {
   width: 100%;
@@ -631,7 +638,7 @@ body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top));
 .nav {
   display: flex;
   align-items: center;
-  height: 56px;
+  height: var(--nav-h);
   padding: 0 24px;
   padding-left: max(24px, env(safe-area-inset-left));
   padding-right: max(24px, env(safe-area-inset-right));
@@ -1430,12 +1437,11 @@ body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top));
     border-bottom: 1px solid var(--line);
     padding-left: max(10px, env(safe-area-inset-left));
     padding-right: max(10px, env(safe-area-inset-right));
-    /* Sticks under the nav, which sits under the hudbar. The nav is 48px at
-       THIS breakpoint, not the 56px it is on desktop — so 30 + 48. Using the
-       desktop figure left an 8px gap between the nav's bottom edge and the
-       strip, visible as a stray band across the top of every page. */
+    /* Derived from the chrome tokens rather than restated. Hardcoding the
+       sum is what put an 8px band across the top of every page when the nav
+       shrank at this breakpoint. */
     position: sticky;
-    top: calc(78px + env(safe-area-inset-top));
+    top: calc(var(--hud-h) + var(--nav-h) + env(safe-area-inset-top));
     z-index: var(--z-nav);
   }
   .viewstrip::-webkit-scrollbar { display: none; }
@@ -1459,7 +1465,10 @@ body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top));
 @media (max-width: 700px) {
   .hide-sm { display: none; }
 
-  .nav { height: 48px; padding: 0 16px; gap: 14px; }
+  /* Retuning the token, not just this element: the view strip's sticky
+     offset is derived from it, so changing one number keeps them in step. */
+  :root { --nav-h: 48px; }
+  .nav { height: var(--nav-h); padding: 0 16px; gap: 14px; }
   .nav-logo { font-size: 1.05rem; }
   .nav-links { gap: 18px; }
   .nav-link { letter-spacing: 0.12em; }

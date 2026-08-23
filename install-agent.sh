@@ -146,6 +146,14 @@ After=network-online.target tailscaled.service
 Type=simple
 User=$RUN_USER
 EnvironmentFile=$ETC/agent.env
+# The microphone and touchpad controls talk to the user's session services —
+# pactl needs the PulseAudio/PipeWire socket, gsettings needs the session bus.
+# A system unit has neither by default, so those two controls silently vanished
+# from the UI: capabilities() probes them, finds nothing, and correctly does not
+# render a control that cannot work. Pointing at the session's runtime dir gives
+# them back.
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u "$RUN_USER")
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$RUN_USER")/bus
 WorkingDirectory=$LIB
 ExecStart=/usr/bin/python3 -u $LIB/agent.py
 Restart=on-failure
