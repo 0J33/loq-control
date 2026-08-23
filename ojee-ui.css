@@ -1430,9 +1430,12 @@ body.app .nav    { position: sticky; top: calc(30px + env(safe-area-inset-top));
     border-bottom: 1px solid var(--line);
     padding-left: max(10px, env(safe-area-inset-left));
     padding-right: max(10px, env(safe-area-inset-right));
-    /* Sticks under the nav, which sits under the hudbar: 30 + 56. */
+    /* Sticks under the nav, which sits under the hudbar. The nav is 48px at
+       THIS breakpoint, not the 56px it is on desktop — so 30 + 48. Using the
+       desktop figure left an 8px gap between the nav's bottom edge and the
+       strip, visible as a stray band across the top of every page. */
     position: sticky;
-    top: calc(86px + env(safe-area-inset-top));
+    top: calc(78px + env(safe-area-inset-top));
     z-index: var(--z-nav);
   }
   .viewstrip::-webkit-scrollbar { display: none; }
