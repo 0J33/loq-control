@@ -3,6 +3,7 @@
 
 import sys
 import os
+import re
 import json
 import subprocess
 import glob
@@ -18,7 +19,8 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QStackedWidget)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (QFont, QIcon, QPainter, QColor, QPen,
-                         QKeySequence, QPixmap, QLinearGradient)
+                         QKeySequence, QPixmap, QLinearGradient,
+                         QRadialGradient, QBrush)
 
 
 class NoScrollSlider(QSlider):
@@ -206,11 +208,19 @@ MEM_LABELS = ['Auto', '9 GHz', '11 GHz', '12 GHz']
 # Crossover point between Auto and locked is at 90 MHz on the slider.
 
 
+# web .panel — a translucent tint over the page gradient, not a flat fill,
+# and a hover that lifts the border and washes the surface with accent.
+# Qt stylesheets DO take rgba(), so this composites for real: the gradient
+# and the dot grid read through the card exactly as they do in the browser.
 CARD_STYLE = f"""
-    QFrame {{
-        background-color: {T['CARD']};
-        border: 1px solid {T['BORDER']};
+    QFrame#card {{
+        background-color: {T['PANEL_A']};
+        border: 1px solid {T['LINE_2']};
         border-radius: 0px;
+    }}
+    QFrame#card:hover {{
+        background-color: {T['ACCENT03_A']};
+        border-color: {T['LINE_HOVER']};
     }}
 """
 SLIDER_STYLE = f"""
@@ -513,26 +523,68 @@ class CornerFrame(QFrame):
 
 
 class GridBackdrop(QWidget):
-    """web .grid-bg — the 18px dot-grid surface everything sits on."""
+    """The page background: gradient, accent glow, then the dot grid.
 
-    _tile = None
+    This used to fill a flat --bg and tile opaque dots over it. The web page
+    is three layers — a vertical --bg-0 -> --bg-1 gradient, a large soft
+    accent glow up and to the right, and an 18px dot grid — and every surface
+    stacked on it is translucent, so the gradient reads through the cards.
+    Flattening all of that is most of why the desktop looked matte and dead
+    beside the page it mirrors.
+
+    The dots are painted with alpha onto the gradient rather than baked into
+    an opaque tile, so they darken and lighten with it the way they do in CSS.
+    """
+
+    _dots = None
 
     @classmethod
-    def tile(cls):
-        if cls._tile is None:
+    def dot_tile(cls):
+        """18px transparent tile with one dot — matches .grid-bg's spacing."""
+        if cls._dots is None:
             t = QPixmap(18, 18)
-            t.fill(QColor(T['BG']))
+            t.fill(Qt.transparent)
             p = QPainter(t)
-            dot = QColor(T['TEXT'])
-            dot.setAlpha(15)  # ≈6% — radial-gradient dot opacity in css
-            p.fillRect(0, 0, 1, 1, dot)
+            c = QColor(T['BG_0'])
+            m = re.match(r'rgba\(([^)]+)\)', T['DOT_A'])
+            if m:
+                parts = [x.strip() for x in m.group(1).split(',')]
+                c = QColor(int(parts[0]), int(parts[1]), int(parts[2]),
+                           int(parts[3]) if len(parts) > 3 else 255)
+            p.fillRect(0, 0, 1, 1, c)
             p.end()
-            cls._tile = t
-        return cls._tile
+            cls._dots = t
+        return cls._dots
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.drawTiledPixmap(self.rect(), self.tile())
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = self.rect()
+
+        # 1. linear-gradient(180deg, --bg-0, --bg-1)
+        g = QLinearGradient(0, r.top(), 0, r.bottom())
+        g.setColorAt(0.0, QColor(T['BG_0']))
+        g.setColorAt(1.0, QColor(T['BG_1']))
+        p.fillRect(r, QBrush(g))
+
+        # 2. radial-gradient(1200x800 at 70% 26%, --glow-faint, transparent 60%)
+        m = re.match(r'rgba\(([^)]+)\)', T['GLOW_A'])
+        if m:
+            parts = [x.strip() for x in m.group(1).split(',')]
+            glow = QColor(int(parts[0]), int(parts[1]), int(parts[2]),
+                          int(parts[3]) if len(parts) > 3 else 255)
+            clear = QColor(glow); clear.setAlpha(0)
+            cx, cy = r.width() * 0.70, r.height() * 0.26
+            rad = max(r.width(), 1) * 0.85
+            rg = QRadialGradient(cx, cy, rad)
+            rg.setColorAt(0.0, glow)
+            rg.setColorAt(0.6, clear)
+            rg.setColorAt(1.0, clear)
+            p.fillRect(r, QBrush(rg))
+
+        # 3. the dot grid, over both
+        p.drawTiledPixmap(r, self.dot_tile())
+        p.end()
 
 
 class TempGraph(QWidget):
@@ -1843,7 +1895,11 @@ class LOQControl(QWidget):
         return page
 
     def _card(self):
-        c = QFrame(); c.setStyleSheet(CARD_STYLE)
+        c = QFrame()
+        # Named so CARD_STYLE targets THIS frame only. An unqualified QFrame
+        # rule repainted every separator, tile and rule nested inside it.
+        c.setObjectName('card')
+        c.setStyleSheet(CARD_STYLE)
         c.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         v = QVBoxLayout(c)
         v.setContentsMargins(16, 14, 16, 14); v.setSpacing(10)
@@ -2599,9 +2655,12 @@ class LOQControl(QWidget):
             color = T['ACCENT']
 
         frame = CornerFrame()
+        frame.setObjectName('tile')
         frame.setStyleSheet(
-            f'QFrame {{ background: {T["BTN_DEF"]}; '
-            f'border: 1px solid {T["LINE"]}; border-radius: 0px; }}')
+            f'QFrame#tile {{ background: {T["TINT2_A"]}; '
+            f'border: 1px solid {T["LINE_2"]}; border-radius: 0px; }} '
+            f'QFrame#tile:hover {{ background: {T["ACCENT03_A"]}; '
+            f'border-color: {T["LINE_HOVER"]}; }}')
         lay = QVBoxLayout(frame)
         # Room for the brackets to sit clear of the text, as they do on the web.
         lay.setContentsMargins(16, 14, 16, 14); lay.setSpacing(4)

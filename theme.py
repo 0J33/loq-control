@@ -106,6 +106,41 @@ def _alpha(value: str) -> float:
     return float(parts[3]) if len(parts) > 3 else 1.0
 
 
+# Tokens that stay TRANSLUCENT. Qt stylesheets do accept rgba(), so these do
+# not need compositing — and must not be composited, because the whole point
+# is that the gradient and the dot grid show through the surfaces stacked on
+# top. Flattening them is what made the desktop look like a different, matte
+# version of the same page.
+ALPHA_MAP = {
+    "PANEL_A":     "--panel",
+    "TINT1_A":     "--tint-1",
+    "TINT2_A":     "--tint-2",
+    "ACCENT03_A":  "--accent-03",
+    "ACCENT08_A":  "--accent-08",
+    "DOT_A":       "--dot-grid",
+    "GLOW_A":      "--glow-faint",
+}
+
+ALPHA_FALLBACK = dict(
+    PANEL_A="rgba(255, 255, 255, 5)",
+    TINT1_A="rgba(216, 222, 236, 5)",
+    TINT2_A="rgba(216, 222, 236, 8)",
+    ACCENT03_A="rgba(0, 255, 255, 8)",
+    ACCENT08_A="rgba(0, 255, 255, 20)",
+    DOT_A="rgba(216, 222, 236, 15)",
+    GLOW_A="rgba(0, 255, 255, 20)",
+)
+
+
+def _qt_rgba(value: str) -> str | None:
+    """CSS rgba() with 0..1 alpha -> Qt rgba() with 0..255 alpha."""
+    rgb = _rgb(value)
+    if not rgb:
+        return None
+    a = round(_alpha(value) * 255)
+    return f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {a})"
+
+
 def load_theme() -> dict[str, str]:
     try:
         tokens = _parse_tokens(CSS.read_text())
@@ -147,4 +182,24 @@ def load_theme() -> dict[str, str]:
     out["TOG_ON"] = out["ACCENT"]
     out["TOG_ON_H"] = out["BTN_ACT_H"]
     out["ACCENT_DIM"] = out.get("CORE_MED", out["ACCENT"])
+
+    out.update(ALPHA_FALLBACK)
+    for name, token in ALPHA_MAP.items():
+        raw = tokens.get(token)
+        if raw:
+            q = _qt_rgba(raw)
+            if q:
+                out[name] = q
+
+    # The page gradient runs --bg-0 -> --bg-1 top to bottom, with a faint
+    # accent glow over it. The desktop painted one flat colour.
+    for name, token in (("BG_0", "--bg-0"), ("BG_1", "--bg-1"),
+                        ("LINE_2", "--line-2"), ("LINE_HOVER", "--line-hover")):
+        rgb = _rgb(tokens.get(token, ""))
+        if rgb:
+            out[name] = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+    out.setdefault("BG_0", "#06060a")
+    out.setdefault("BG_1", "#0a0a10")
+    out.setdefault("LINE_2", "#131319")
+    out.setdefault("LINE_HOVER", "#2c2f38")
     return out
