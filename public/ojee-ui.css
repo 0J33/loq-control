@@ -42,6 +42,17 @@
 
   /* Chrome backgrounds — same hue as --bg at four opacities, so a
      blurred bar over scrolling content still reads as one surface. */
+  /* ONE material for every layer of fixed chrome.
+     There used to be three: the hud strip on --chrome-2 with no blur, the nav
+     on --chrome with blur(8px), the view strip on --chrome-2 with no blur, and
+     the tab bar on --chrome-3 with blur. Stacked directly on top of each other
+     they read as three different panes of glass rather than one surface —
+     which is exactly what they look like. --chrome-surface and --chrome-blur
+     are the single recipe; the numbered tokens stay for panels and windows
+     that are genuinely a different depth. */
+  --chrome-surface: rgba(8, 8, 14, 0.82);
+  --chrome-blur: saturate(140%) blur(14px);
+
   --chrome:    rgba(8, 8, 14, 0.90);
   --chrome-2:  rgba(8, 8, 14, 0.92);
   --chrome-3:  rgba(8, 8, 14, 0.96);
@@ -643,9 +654,10 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
   padding-left: max(24px, env(safe-area-inset-left));
   padding-right: max(24px, env(safe-area-inset-right));
   gap: 24px;
-  background: var(--chrome);
+  background: var(--chrome-surface);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: var(--chrome-blur);
+  backdrop-filter: var(--chrome-blur);
 }
 .nav-logo { font-family: var(--pixel); font-size: 1.4rem; text-transform: lowercase; letter-spacing: 0.05em; color: var(--ink); }
 .nav-logo .dot-accent { color: var(--accent); }
@@ -697,7 +709,9 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
   padding-left: max(16px, env(safe-area-inset-left));
   padding-right: max(16px, env(safe-area-inset-right));
   border-bottom: 1px solid var(--line);
-  background: var(--chrome-2);
+  background: var(--chrome-surface);
+  -webkit-backdrop-filter: var(--chrome-blur);
+  backdrop-filter: var(--chrome-blur);
   font-family: var(--hud);
   font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--dim);
@@ -1433,7 +1447,9 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
     gap: 2px;
     overflow-x: auto;
     scrollbar-width: none;
-    background: var(--chrome-2);
+    background: var(--chrome-surface);
+    -webkit-backdrop-filter: var(--chrome-blur);
+    backdrop-filter: var(--chrome-blur);
     border-bottom: 1px solid var(--line);
     padding-left: max(10px, env(safe-area-inset-left));
     padding-right: max(10px, env(safe-area-inset-right));
@@ -1505,4 +1521,209 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
 @media (max-width: 480px) {
   .segctl--glyph button { padding: 9px 4px; }
   .segctl--glyph .ic { width: 22px; height: 22px; }
+}
+
+/* ============================================================
+   LAUNCHER — the console's front door.
+   A grid of module cards with live status. Cards rather than a
+   list because each one carries a lamp, a count and a detail
+   line, which a row cannot hold legibly.
+   ============================================================ */
+
+.lc { display: flex; flex-direction: column; gap: var(--s-5); padding-top: var(--s-4); }
+
+.lc-head { display: flex; flex-direction: column; gap: 6px; }
+.lc-kicker {
+  font-family: var(--hud); font-size: 0.6rem; letter-spacing: 0.24em;
+  text-transform: uppercase; color: var(--accent);
+}
+.lc-title {
+  font-family: var(--pixel);
+  /* Fluid, so the wordmark is the anchor of the page on a phone and on a
+     desktop without two hand-tuned sizes. */
+  font-size: clamp(2.2rem, 9vw, 4rem);
+  line-height: 0.95; letter-spacing: 0.02em;
+  text-transform: lowercase; color: var(--ink-hi);
+}
+.lc-title .lc-dot { color: var(--accent); text-shadow: 0 0 18px var(--glow); }
+.lc-sub { font-family: var(--mono); font-size: 0.72rem; color: var(--dim); }
+.lc-sub .lc-sub-strong { color: var(--ink); font-weight: 700; }
+
+.lc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 2px;
+}
+
+.lc-card {
+  position: relative;
+  display: flex; flex-direction: column; gap: 10px;
+  min-height: 148px; padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  text-decoration: none;
+  overflow: hidden;
+  transition: border-color var(--dur), background var(--dur), transform var(--dur);
+  /* Staggered entrance. 40ms apart reads as one wave rather than a queue,
+     and the whole grid settles inside 400ms. */
+  animation: lc-in 320ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+@keyframes lc-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
+
+/* A wash that only appears on the active card, so the grid stays quiet until
+   you point at it. */
+.lc-card::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(120% 90% at 0% 0%, var(--accent-08), transparent 60%);
+  opacity: 0; transition: opacity var(--dur);
+  pointer-events: none;
+}
+.lc-card:hover, .lc-card:focus-visible { border-color: var(--accent); color: var(--ink); }
+.lc-card:hover::after, .lc-card:focus-visible::after { opacity: 1; }
+.lc-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.lc-card:active { transform: scale(0.985); }
+
+.lc-card .lc-ic { color: var(--accent); }
+.lc-card .lc-name {
+  margin-top: auto;
+  font-family: var(--mono); font-size: 0.94rem; font-weight: 900;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink);
+}
+.lc-card .lc-state {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.64rem; color: var(--dim);
+}
+.lc-card .lc-ver {
+  position: absolute; top: 16px; right: 16px;
+  font-family: var(--hud); font-size: 0.55rem; letter-spacing: 0.12em; color: var(--dim);
+}
+/* Unreachable modules stay visible and say why — hiding one makes a bad
+   deploy look like a feature that never existed. */
+.lc-card--down { opacity: 0.6; }
+.lc-card--down .lc-ic { color: var(--warn); }
+.lc-card--down .lc-name { text-decoration: line-through; }
+
+.lc-foot {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  padding-top: var(--s-3); border-top: 1px solid var(--line);
+}
+.lc-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: var(--hit);
+  font-family: var(--mono); font-size: 0.66rem; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-2); text-decoration: none;
+}
+.lc-link:hover { color: var(--accent); }
+.lc-foot .meta { margin-left: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-card { animation: none; }
+}
+@media (max-width: 700px) {
+  .lc-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .lc-card { min-height: 128px; padding: 14px; }
+  .lc-foot .meta { display: none; }
+}
+
+/* ============================================================
+   COMMAND PALETTE — one keystroke to anywhere.
+   Tab strips do not scale: four modules with twelve views is
+   already a wall of links. This is O(1) to use however many
+   destinations exist.
+   ============================================================ */
+
+.cp-backdrop {
+  position: fixed; inset: 0; z-index: var(--z-modal);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: max(12vh, env(safe-area-inset-top)) var(--s-3) var(--s-3);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: cp-fade 140ms ease-out;
+}
+@keyframes cp-fade { from { opacity: 0; } }
+
+.cp {
+  width: min(560px, 100%);
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  animation: cp-rise 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes cp-rise { from { opacity: 0; transform: translateY(-8px) scale(0.98); } }
+
+.cp-field {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--accent);
+}
+.cp-input {
+  flex: 1; min-width: 0;
+  background: none; border: 0; outline: none;
+  color: var(--ink);
+  font-family: var(--mono);
+  /* 16px: anything smaller and iOS zooms the page when it takes focus. */
+  font-size: 16px;
+}
+.cp-input::placeholder { color: var(--dim); }
+
+.cp-list { list-style: none; margin: 0; padding: 4px; max-height: 46vh; overflow-y: auto; }
+.cp-item {
+  display: flex; align-items: center; gap: 12px;
+  min-height: var(--hit); padding: 8px 10px;
+  color: var(--ink-2); cursor: pointer;
+  border: 1px solid transparent;
+}
+.cp-item .ic { color: var(--dim); flex: none; }
+.cp-item .cp-label {
+  font-family: var(--mono); font-size: 0.76rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cp-item .cp-hint {
+  margin-left: auto; flex: none;
+  font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim);
+}
+/* Selection is a border plus a wash, not colour alone — the keyboard user has
+   to see where they are without relying on hue. */
+.cp-item.is-sel {
+  border-color: var(--accent);
+  background: var(--accent-08);
+  color: var(--ink);
+}
+.cp-item.is-sel .ic { color: var(--accent); }
+.cp-item--down { opacity: 0.5; }
+.cp-item--down .cp-label { text-decoration: line-through; }
+.cp-empty { padding: 18px 12px; color: var(--dim); font-size: 0.72rem; text-align: center; }
+
+/* The nav entry point. Icon-only would be undiscoverable, so it says what it
+   is and which key opens it. */
+.nav-jump {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 32px; padding: 0 10px; margin-left: auto;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  color: var(--dim);
+  font-family: var(--mono); font-size: 0.62rem;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  cursor: pointer; transition: var(--t);
+}
+.nav-jump:hover { border-color: var(--accent); color: var(--accent); }
+.nav-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nav-jump .kbd { pointer-events: none; }
+.nav-links + .nav-jump { margin-left: auto; }
+
+@media (max-width: 860px) {
+  /* Keep the affordance, drop the words — the bar is tight on a phone. */
+  .nav-jump span, .nav-jump .kbd { display: none; }
+  .nav-jump { padding: 0; width: 34px; justify-content: center; }
+  .cp-backdrop { padding-top: max(8vh, env(safe-area-inset-top)); }
+  .cp-list { max-height: 52vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-backdrop, .cp { animation: none; }
 }

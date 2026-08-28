@@ -338,6 +338,66 @@ class StackedPages(QStackedWidget):
         return w.minimumSizeHint() if w else super().minimumSizeHint()
 
 
+class HudBar(QWidget):
+    """The console's top status strip, as a widget.
+
+    Every web surface opens with this: a thin tracked-uppercase band carrying
+    state, identity and the clock. The desktop app was the only surface
+    without it, which is most of why it read as a different product rather
+    than the same one in a different frame.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(30)
+        self.setAutoFillBackground(False)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(16, 0, 16, 0)
+        row.setSpacing(26)
+
+        def seg(text, accent=False):
+            lab = QLabel(text)
+            lab.setFont(mkfont(8, ls=2.6, family=FONT_HUD))
+            lab.setStyleSheet(
+                f'color: {T["ACCENT"] if accent else T["TEXT_MUTED"]}; background: transparent;')
+            return lab
+
+        self._state = seg('NOMINAL', accent=True)
+        row.addWidget(self._state)
+        row.addWidget(seg(f'HOST {os.uname().nodename}'))
+        self._profile = seg('PROFILE —')
+        row.addWidget(self._profile)
+        row.addStretch()
+        self._clock = seg('')
+        row.addWidget(self._clock)
+
+        self._tick = QTimer(self)
+        self._tick.timeout.connect(self._paint_clock)
+        self._tick.start(1000)
+        self._paint_clock()
+
+    def _paint_clock(self):
+        self._clock.setText(time.strftime('LOCAL %H:%M:%S'))
+
+    def set_state(self, text, ok=True):
+        self._state.setText(text.upper())
+        self._state.setStyleSheet(
+            f'color: {T["ACCENT"] if ok else T["CORE_MAX"]}; background: transparent;')
+
+    def set_profile(self, name):
+        self._profile.setText(f'PROFILE {str(name or "—").upper()}')
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(T['CARD']))
+        pen = QPen(QColor(T['BORDER']))
+        pen.setWidth(1)
+        p.setPen(pen)
+        p.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        p.end()
+
+
 class NavTabs(QWidget):
     """The web shell's .nav-link row, as a widget.
 
@@ -1365,6 +1425,14 @@ class LOQControl(QWidget):
     def initUI(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # The strip sits OUTSIDE the scroll area, edge to edge, exactly as it
+        # does on the web: it is chrome, not content, and it must not scroll
+        # away with the cards.
+        self.hud = HudBar()
+        outer.addWidget(self.hud)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -2892,6 +2960,10 @@ class LOQControl(QWidget):
     def refresh_profile(self):
         p = read_sys('/sys/firmware/acpi/platform_profile')
         self.profile_status.setText(p.upper().replace('-', ' '))
+        # Mirror it into the HUD strip, so the top band says something true
+        # rather than being decoration.
+        if getattr(self, 'hud', None):
+            self.hud.set_profile(p.replace('-', ' '))
         for k, b in self.profile_btns.items():
             self._set_btn_active(b, k == p)
 

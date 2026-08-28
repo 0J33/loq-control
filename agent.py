@@ -39,6 +39,33 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import control  # noqa: E402
 import hardware as hw  # noqa: E402
 
+def _tailnet_ip(timeout_s: float = 90.0) -> str | None:
+    """Wait for this machine to have a Tailscale address.
+
+    `tailscale ip -4` answers nothing for the first few seconds after boot,
+    while tailscaled starts and authenticates. systemd's After= only orders
+    the START of the unit, not readiness — so asking once, at startup, is a
+    race. Losing it meant binding loopback and staying there for the life of
+    the process: the agent looked healthy, the port was open, and nothing off
+    the machine could reach it. That is the "LOQ doesn't always connect".
+    """
+    deadline = time.monotonic() + timeout_s
+    delay = 0.5
+    while True:
+        try:
+            r = subprocess.run(['tailscale', 'ip', '-4'],
+                               capture_output=True, text=True, timeout=5)
+            addr = (r.stdout or '').strip().splitlines()
+            if r.returncode == 0 and addr and addr[0].strip():
+                return addr[0].strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(delay)
+        delay = min(delay * 1.6, 5.0)
+
+
 def _default_bind() -> str:
     """This machine's Tailscale address, or loopback — never 0.0.0.0.
 
@@ -52,15 +79,14 @@ def _default_bind() -> str:
     Tailscale is not up yet, the agent starts unreachable instead of starting
     wide open. LOQ_BIND overrides this for anyone fronting it differently.
     """
-    try:
-        r = subprocess.run(['tailscale', 'ip', '-4'],
-                           capture_output=True, text=True, timeout=5)
-        addr = (r.stdout or '').strip().splitlines()
-        if r.returncode == 0 and addr and addr[0].strip():
-            return addr[0].strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return '127.0.0.1'
+    ip = _tailnet_ip()
+    if ip:
+        return ip
+    # Exit rather than bind loopback. systemd restarts us, and a service that
+    # keeps retrying is far better than one that is up, healthy-looking and
+    # permanently unreachable. Set LOQ_BIND explicitly to override.
+    sys.exit('no Tailscale address after 90s — refusing to bind loopback '
+             'silently. Set LOQ_BIND to override.')
 
 
 HOST = os.environ.get('LOQ_BIND') or _default_bind()
