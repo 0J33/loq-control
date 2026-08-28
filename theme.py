@@ -40,6 +40,12 @@ TOKEN_MAP = {
     "CORE_MAX":   "--cell-3",
     # Qt has no alpha compositing in these stylesheet strings, so the
     # translucent tokens are resolved to their composited value below.
+    # The threshold colours. The desktop had none, so every metric tile
+    # carried a hand-picked hue instead — a rainbow the web build does not
+    # have. With these it can say "warn" and "err" the same way.
+    "WARN":       "--warn",
+    "ERR":        "--err",
+    "LINE":       "--line-2",
     "BORDER":     "--line-strong",
     "GR_GRID":    "--line-strong",
     "GR_TEXT":    "--dim",
@@ -55,6 +61,7 @@ FALLBACK = dict(
     CORE_LO="#191922", CORE_MED="#0a8f8f",
     CORE_HI="#00bdbd", CORE_MAX="#00ffff",
     ACCENT="#00ffff", ACCENT_DIM="#0a8f8f",
+    WARN="#ffb000", ERR="#ff3b30", LINE="#131319",
 )
 
 

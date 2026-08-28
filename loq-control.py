@@ -472,6 +472,46 @@ class NavTabs(QWidget):
         return self._active
 
 
+class MetaLabel(QLabel):
+    """web .meta — uppercase, always.
+
+    Qt has no text-transform, so a plain QLabel only stays uppercase until
+    the next refresh writes to it. Every sub-line in the app goes through
+    this instead, so no update path can reintroduce mixed case.
+    """
+
+    def setText(self, text):
+        super().setText((text or '').upper())
+
+
+class CornerFrame(QFrame):
+    """web .corners — the four 14px accent brackets on a metric tile.
+
+    The web build frames a readout with brackets rather than a full border;
+    it is the single most recognisable thing about a tile there, and the
+    desktop drew a plain box instead. Qt has no ::before/::after, so the
+    brackets are painted.
+    """
+
+    BRACKET = 14
+    INSET = 0
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, False)
+        pen = QPen(QColor(T['ACCENT']))
+        pen.setWidth(1)
+        p.setPen(pen)
+        w, h, b, i = self.width(), self.height(), self.BRACKET, self.INSET
+        x0, y0, x1, y1 = i, i, w - 1 - i, h - 1 - i
+        for (cx, cy, dx, dy) in ((x0, y0, 1, 1), (x1, y0, -1, 1),
+                                 (x0, y1, 1, -1), (x1, y1, -1, -1)):
+            p.drawLine(cx, cy, cx + dx * b, cy)
+            p.drawLine(cx, cy, cx, cy + dy * b)
+        p.end()
+
+
 class GridBackdrop(QWidget):
     """web .grid-bg — the 18px dot-grid surface everything sits on."""
 
@@ -1565,13 +1605,43 @@ class LOQControl(QWidget):
         """)
         return b
 
-    def _header(self, text):
-        # web .h2: uppercase 900-weight
+    def _header(self, text, idx=None):
+        """web .section-head — an accent index, the title, and a rule under it.
+
+        This was the title alone. Every view in the web build opens with
+        `A.1  CPU`: the index in accent HUD type, the title beside it, a
+        hairline below. Without it the desktop's cards ran together and did
+        not look like the same product as the page they mirror.
+        """
+        # Indices are per tab, as on the web: A.* is Monitor, B.* Power,
+        # C.* Battery, D.* System.
+        idx = idx or ''
+        row = QWidget()
+        row.setStyleSheet('background: transparent;')
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 6); h.setSpacing(12)
+        i = QLabel(idx)
+        i.setFont(mkfont(8, ls=1.8, family=FONT_HUD))
+        i.setStyleSheet(
+            f'color: {T["ACCENT"]}; border: none; background: transparent;')
+        h.addWidget(i)
         l = QLabel(text.upper())
         l.setFont(mkfont(11, bold=True, ls=1.2))
         l.setStyleSheet(
             f'color: {T["TEXT"]}; border: none; background: transparent;')
-        return l
+        h.addWidget(l)
+        h.addStretch()
+
+        wrap = QWidget()
+        wrap.setStyleSheet('background: transparent;')
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(0, 0, 0, 0); v.setSpacing(0)
+        v.addWidget(row)
+        rule = QFrame()
+        rule.setFixedHeight(1)
+        rule.setStyleSheet(f'background: {T["LINE"]}; border: none;')
+        v.addWidget(rule)
+        return wrap
 
     def _sub_header(self, text):
         l = QLabel(text.upper())
@@ -1781,7 +1851,7 @@ class LOQControl(QWidget):
 
     def _build_sensors_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('Sensors'))
+        vbox.addWidget(self._header('Sensors', 'A.1'))
 
         self._sensor_tiles = {}
 
@@ -1875,7 +1945,7 @@ class LOQControl(QWidget):
 
     def _build_temp_graph_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('Temperature History'))
+        vbox.addWidget(self._header('Temperature History', 'A.3'))
         self.temp_graph = TempGraph(60)
         vbox.addWidget(self.temp_graph)
         return card
@@ -1883,7 +1953,7 @@ class LOQControl(QWidget):
     def _build_battery_card(self):
         card, vbox = self._card()
         hdr = QHBoxLayout()
-        hdr.addWidget(self._header('Battery'))
+        hdr.addWidget(self._header('Battery', 'C.1'))
         hdr.addStretch()
         self.batt_status_lbl = QLabel('--')
         self.batt_status_lbl.setFont(QFont(FONT, 8, QFont.Bold))
@@ -2002,7 +2072,7 @@ class LOQControl(QWidget):
 
     def _build_profile_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('Performance'))
+        vbox.addWidget(self._header('Performance', 'B.1'))
         self.profile_status = self._info()
         vbox.addWidget(self.profile_status)
         g = QGridLayout(); g.setSpacing(6)
@@ -2047,7 +2117,7 @@ class LOQControl(QWidget):
 
     def _build_gpu_mode_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('GPU Mode'))
+        vbox.addWidget(self._header('GPU Mode', 'B.2'))
         self.gpu_mode_status = self._info()
         vbox.addWidget(self.gpu_mode_status)
         row = QHBoxLayout(); row.setSpacing(6)
@@ -2069,7 +2139,7 @@ class LOQControl(QWidget):
     def _build_overclock_card(self):
         card, vbox = self._card()
         hdr = QHBoxLayout()
-        hdr.addWidget(self._header('GPU Overclock'))
+        hdr.addWidget(self._header('GPU Overclock', 'B.3'))
         hdr.addStretch()
         note = QLabel('// resets on reboot')
         note.setFont(mkfont(8, ls=1.0, family=FONT_HUD))
@@ -2262,7 +2332,7 @@ class LOQControl(QWidget):
     def _build_proc_manager_card(self):
         card, vbox = self._card()
         hdr = QHBoxLayout()
-        hdr.addWidget(self._header('Process Manager'))
+        hdr.addWidget(self._header('Process Manager', 'D.3'))
         hdr.addStretch()
         btn = self._btn('Open', fs=9)
         btn.setFixedSize(80, 30)
@@ -2281,7 +2351,7 @@ class LOQControl(QWidget):
 
     def _build_kbd_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('Keyboard Backlight'))
+        vbox.addWidget(self._header('Keyboard Backlight', 'D.1'))
         self.kbd_status = self._info()
         vbox.addWidget(self.kbd_status)
         row = QHBoxLayout(); row.setSpacing(8)
@@ -2296,7 +2366,7 @@ class LOQControl(QWidget):
 
     def _build_toggles_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('Quick Settings'))
+        vbox.addWidget(self._header('Quick Settings', 'D.2'))
         for name, attr, handler in [
                 ('Microphone', 'mic_sw', 'toggle_mic'),
                 ('FN Lock', 'fn_sw', 'toggle_fn_lock'),
@@ -2328,7 +2398,7 @@ class LOQControl(QWidget):
 
     def _build_activity_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('Activity Monitor'))
+        vbox.addWidget(self._header('Activity Monitor', 'A.2'))
 
         self._activity_tiles = {}
         self._activity_order = []  # explicit order list
@@ -2519,32 +2589,41 @@ class LOQControl(QWidget):
     def _make_metric_tile(self, label, color, show_bar=False, bar_max=100,
                           primary='--', secondary='', fixed_max=None,
                           fmt=None, color2=None, label1='', label2=''):
-        frame = QFrame()
-        # surfaces lighten as they stack (web: .panel tint over --bg)
+        # One accent, not a hue per metric. Every tile used to pass its own
+        # colour — #cc99ff, #88ccff, #dd9944, #44bbaa — so the desktop read
+        # as a rainbow dashboard while the web build is monochrome accent
+        # with warn/err reserved for a crossed threshold. `color` is still
+        # accepted so callers need not all change at once, but a tile that
+        # asks for a decorative hue gets the accent.
+        if color not in (T['ACCENT'], T['WARN'], T['ERR']):
+            color = T['ACCENT']
+
+        frame = CornerFrame()
         frame.setStyleSheet(
             f'QFrame {{ background: {T["BTN_DEF"]}; '
-            f'border: 1px solid {T["BORDER"]}; border-radius: 0px; }}')
+            f'border: 1px solid {T["LINE"]}; border-radius: 0px; }}')
         lay = QVBoxLayout(frame)
-        lay.setContentsMargins(12, 10, 12, 10); lay.setSpacing(6)
-        top = QHBoxLayout(); top.setSpacing(8)
-        lbl = QLabel(label)
+        # Room for the brackets to sit clear of the text, as they do on the web.
+        lay.setContentsMargins(16, 14, 16, 14); lay.setSpacing(4)
+        lbl = QLabel(label.upper())
         lbl.setFont(mkfont(8, ls=1.5, family=FONT_HUD))
         lbl.setStyleSheet(
             f'color: {T["TEXT_MUTED"]}; border: none; background: transparent; '
             f'letter-spacing: 1.5px;')
-        top.addWidget(lbl)
-        top.addStretch()
-        sec = QLabel(secondary)
-        sec.setFont(QFont(FONT, 8))
-        sec.setStyleSheet(
-            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
-        top.addWidget(sec)
-        lay.addLayout(top)
+        lay.addWidget(lbl)
         pri = QLabel(primary)
-        pri.setFont(QFont(FONT, 12, QFont.Bold))
+        pri.setFont(QFont(FONT, 15, QFont.Bold))
         pri.setStyleSheet(
             f'color: {T["TEXT"]}; border: none; background: transparent;')
         lay.addWidget(pri)
+        # The sub-line goes UNDER the value, where web puts .meta — it used
+        # to sit top-right, opposite the label, which is a slot the design
+        # system does not have.
+        sec = MetaLabel(secondary)
+        sec.setFont(mkfont(8, ls=1.0, family=FONT_HUD))
+        sec.setStyleSheet(
+            f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
+        lay.addWidget(sec)
         bar = None
         if show_bar:
             bar = QProgressBar()
@@ -2567,7 +2646,7 @@ class LOQControl(QWidget):
 
     def _build_updates_card(self):
         card, vbox = self._card()
-        vbox.addWidget(self._header('System Info'))
+        vbox.addWidget(self._header('System Info', 'D.4'))
         for name, attr in [('NVIDIA Driver', 'nv_ver'),
                            ('Kernel', 'kern_ver'), ('BIOS', 'bios_ver')]:
             r, v = self._val_row(name)
@@ -2800,6 +2879,11 @@ class LOQControl(QWidget):
                     f'color: {T["TEXT_MUTED"]}; border: none; background: transparent;')
                 tile['_last_sec_state'] = 'peak'
 
+    # Thresholds per metric, matching the web module's: CPU 85/95, GPU 80/88.
+    # The desktop coloured a temperature tile permanently red instead, which
+    # says "hot" whether the die is at 40°C or 99°C.
+    _HEAT = {'cpu_tmp': (85, 95), 'gpu_tmp': (80, 88)}
+
     def _set_sensor(self, key, value, text, peak_fmt=None):
         tile = self._sensor_tiles.get(key)
         if not tile:
@@ -2809,6 +2893,13 @@ class LOQControl(QWidget):
         tile['peak'] = max(tile['peak'], value)
         if peak_fmt:
             tile['secondary'].setText(peak_fmt.format(p=int(tile['peak'])))
+        band = self._HEAT.get(key)
+        if band:
+            warn, hot = band
+            col = (T['ERR'] if value >= hot
+                   else T['WARN'] if value >= warn else T['TEXT'])
+            tile['primary'].setStyleSheet(
+                f'color: {col}; border: none; background: transparent;')
 
     def refresh_activity(self):
         now = time.monotonic()
