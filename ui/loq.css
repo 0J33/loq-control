@@ -157,5 +157,10 @@
   .lq-ctl-act { margin-left: 0; width: 100%; }
   .lq-slider { width: 100%; }
   .lq-proc .lq-p-cmd, .lq-proc .lq-c-user { display: none; }
-  .lq-proc-wrap { max-height: 60vh; }
+  /* No nested scroller on a phone. A 60vh box inside a scrolling page
+     means a finger landing on the process list scrolls the list — or,
+     once the list is short enough not to overflow, scrolls nothing at
+     all — instead of the page. The table flows with the document here,
+     so the page is the only thing that scrolls. */
+  .lq-proc-wrap { max-height: none; overflow: visible; }
 }
