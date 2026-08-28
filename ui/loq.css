@@ -18,30 +18,19 @@
 .lq-cell,
 .lq-proc td { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
 
-.lq-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 2px; }
+/* `.panel.corners` supplies the frame and padding; this only keeps the
+   min-width that lets a tile shrink inside the grid, and the heat band
+   that setStat() toggles. */
+.lq-stat { min-width: 0; }
 
-.lq-stat {
-  display: flex; flex-direction: column; gap: 3px;
-  padding: 11px 13px;
-  background: var(--panel);
-  border: 1px solid var(--line-2);
-  min-width: 0;
-}
-.lq-stat .lq-k {
-  font-size: 0.6rem; font-weight: 900; letter-spacing: 0.18em;
-  text-transform: uppercase; color: var(--dim); white-space: nowrap;
-}
-.lq-stat .lq-v {
-  font-family: var(--mono); font-size: 1.15rem; font-weight: 700;
-  color: var(--ink); line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-.lq-stat .lq-u { font-size: 0.7rem; color: var(--ink-2); font-weight: 400; }
-.lq-stat .lq-sub { font-size: 0.62rem; color: var(--dim); white-space: nowrap;
-                   overflow: hidden; text-overflow: ellipsis; }
-/* Heat is reinforcement only — the number is right there and says 97. */
-.lq-stat[data-heat="warn"] .lq-v { color: var(--warn); }
-.lq-stat[data-heat="hot"]  .lq-v { color: var(--err); }
+/* The heat band setStat() sets. It had no rule at all, so every threshold
+   this module computes — CPU at 85/95, GPU at 80/88 — changed nothing on
+   screen. Same two steps agent's tiles use, on the value only: the number
+   is what crossed the threshold, so the number is what changes colour. */
+.lq-stat[data-heat="warn"] .value { color: var(--warn); }
+.lq-stat[data-heat="hot"]  .value { color: var(--err); }
+.lq-stat[data-heat="warn"] { border-color: var(--warn); }
+.lq-stat[data-heat="hot"]  { border-color: var(--err); }
 
 /* ---------- core grid ---------- */
 .lq-cores {
@@ -62,13 +51,6 @@
 
 /* ---------- sparklines ---------- */
 .lq-spark { display: block; width: 100%; height: 46px; }
-.lq-sparkwrap {
-  padding: 10px 12px 6px;
-  background: var(--panel);
-  border: 1px solid var(--line-2);
-}
-.lq-sparkhead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-.lq-sparkhead .lq-v { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* ---------- control rows ---------- */
 .lq-ctl {
@@ -164,3 +146,10 @@
      so the page is the only thing that scrolls. */
   .lq-proc-wrap { max-height: none; overflow: visible; }
 }
+
+/* A tile whose sub-line is a graph — same four parts as a stat tile, so a
+   chart reads as a readout that happens to have a trace. `.lq-sparkwrap`
+   and `.lq-sparkhead` were a private head/body pair that matched nothing. */
+.lq-chart { display: flex; flex-direction: column; gap: 6px; }
+.lq-chart .value { font-size: 1.05rem; }
+.lq-chart .lq-spark { margin-top: 2px; }

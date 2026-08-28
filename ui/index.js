@@ -54,6 +54,11 @@ function fmtBytes(n) {
   return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 }
 const fmtRate = (bps) => `${fmtBytes(bps)}/s`;
+/* Splits "20.5 KB/s" into ["20.5", "KB/s"] so the number renders at .value
+   size and the unit in the <sup>, like every other tile. Baked together it
+   was one long string that wrapped onto a second line. */
+const splitRate = (bps) => { const t = fmtRate(bps); const i = t.indexOf(' ');
+  return i < 0 ? [t, ''] : [t.slice(0, i), t.slice(i + 1)]; };
 
 /** Heat band for a temperature readout. Colour is reinforcement; the number
  *  is always right next to it. */
@@ -72,11 +77,19 @@ function push(arr, v) {
 
 /* ── small render primitives ──────────────────────────────────────────── */
 
+/* The console's readout tile: `.panel.corners` + `<i class="c">` for the
+ * bracket marks, then `.stat` > `.label` / `.value` / `.meta`. This module
+ * had its own `.lq-stat` / `.lq-k` / `.lq-v` / `.lq-sub` set that looked
+ * close but tracked nothing, so LOQ's numbers and Home's never quite
+ * matched. Same classes as home and agent now. */
 function stat(id, k, v, unit = '', sub = '') {
-  return `<div class="lq-stat" id="${id}">
-    <span class="lq-k">${esc(k)}</span>
-    <span class="lq-v"><span data-v>${esc(v)}</span>${unit ? `<span class="lq-u"> ${esc(unit)}</span>` : ''}</span>
-    ${sub ? `<span class="lq-sub" data-sub>${esc(sub)}</span>` : ''}
+  return `<div class="panel corners lq-stat" id="${id}"><i class="c"></i>
+    <div class="stat">
+      <span class="label">${esc(k)}</span>
+      <span class="value"><span data-v>${esc(v)}</span>${
+        unit ? `<sup style="font-size:0.9rem">${esc(unit)}</sup>` : ''}</span>
+      ${sub ? `<span class="meta" data-sub>${esc(sub)}</span>` : ''}
+    </div>
   </div>`;
 }
 
@@ -95,13 +108,19 @@ function setStat(id, v, sub, band) {
   }
 }
 
+/* Writes both halves of a rate readout: the number into [data-v] and the
+   unit into the tile's <sup>. */
+function setRate(id, bps) {
+  const [n, u] = splitRate(bps);
+  setStat(id, n);
+  const sup = $(`#${id}`)?.querySelector('sup');
+  if (sup && sup.textContent !== u) sup.textContent = u;
+}
+
 function sparkline(id, label, unit) {
-  return `<div class="lq-sparkwrap">
-    <div class="lq-sparkhead">
-      <span class="label">${esc(label)}</span>
-      <span class="lq-v" id="${id}-now">—</span>
-      <span class="lq-u">${esc(unit)}</span>
-    </div>
+  return `<div class="panel lq-chart">
+    <span class="label">${esc(label)}</span>
+    <span class="value"><span id="${id}-now">—</span><sup style="font-size:0.9rem">${esc(unit)}</sup></span>
     <svg class="lq-spark" id="${id}" viewBox="0 0 300 46" preserveAspectRatio="none"
          role="img" aria-label="${esc(label)} over the last 90 seconds"></svg>
   </div>`;
@@ -131,10 +150,11 @@ function drawSpark(id, data, { min = 0, max = 100, stroke = 'var(--accent)' } = 
 
 function viewMonitor() {
   return `
-  <div class="stack">
-    <div class="section-head"><span class="label label--accent">CPU</span>
+  <div class="stack-lg">
+    <div class="section-head"><span class="idx">A / MONITOR</span><h2 class="h2">Monitor</h2></div>
+    <div class="section-head"><span class="idx">A.1</span><h3 class="h2">CPU</h3><span class="spacer"></span>
       <span class="meta" id="lq-cpu-model">—</span></div>
-    <div class="lq-stats">
+    <div class="tiles">
       ${stat('lq-cpu-usage', 'load', '—', '%')}
       ${stat('lq-cpu-temp', 'temp', '—', '°C')}
       ${stat('lq-cpu-w', 'package', '—', 'W', 'of — W limit')}
@@ -142,9 +162,9 @@ function viewMonitor() {
     </div>
     <div class="lq-cores" id="lq-cores" role="img" aria-label="per-core load"></div>
 
-    <div class="section-head"><span class="label label--accent">GPU</span>
+    <div class="section-head"><span class="idx">A.2</span><h3 class="h2">GPU</h3><span class="spacer"></span>
       <span class="meta" id="lq-gpu-model">—</span></div>
-    <div class="lq-stats">
+    <div class="tiles">
       ${stat('lq-gpu-usage', 'load', '—', '%')}
       ${stat('lq-gpu-temp', 'temp', '—', '°C')}
       ${stat('lq-gpu-w', 'draw', '—', 'W')}
@@ -159,22 +179,23 @@ function viewMonitor() {
       ${sparkline('lq-sp-gpuu', 'gpu load', '%')}
     </div>
 
-    <div class="section-head"><span class="label label--accent">COOLING &amp; I/O</span></div>
-    <div class="lq-stats">
+    <div class="section-head"><span class="idx">A.3</span><h3 class="h2">Cooling &amp; I/O</h3><span class="spacer"></span></div>
+    <div class="tiles">
       ${stat('lq-fan-cpu', 'cpu fan', '—', 'rpm')}
       ${stat('lq-fan-gpu', 'gpu fan', '—', 'rpm')}
-      ${stat('lq-net-rx', 'net down', '—')}
-      ${stat('lq-net-tx', 'net up', '—')}
-      ${stat('lq-dsk-r', 'disk read', '—')}
-      ${stat('lq-dsk-w', 'disk write', '—')}
+      ${stat('lq-net-rx', 'net down', '—', 'B/s')}
+      ${stat('lq-net-tx', 'net up', '—', 'B/s')}
+      ${stat('lq-dsk-r', 'disk read', '—', 'B/s')}
+      ${stat('lq-dsk-w', 'disk write', '—', 'B/s')}
     </div>
   </div>`;
 }
 
 function viewBattery() {
   const h = snap?.battery?.history;
-  return `<div class="stack">
-    <div class="lq-stats">
+  return `<div class="stack-lg">
+    <div class="section-head"><span class="idx">B / BATTERY</span><h2 class="h2">Battery</h2></div>
+    <div class="tiles">
       ${stat('lq-bat-pct', 'charge', '—', '%')}
       ${stat('lq-bat-status', 'status', '—')}
       ${stat('lq-bat-w', 'flow', '—', 'W')}
@@ -186,7 +207,7 @@ function viewBattery() {
       <span class="meta">caps charging at ~80% to extend pack life</span>
       <span class="lq-row-v">${snap?.state?.conservation ? 'ON' : 'OFF'}</span>
     </div>
-    ${h ? `<div class="section-head"><span class="label label--accent">HEALTH HISTORY</span></div>
+    ${h ? `<div class="section-head"><span class="idx">B.1</span><h3 class="h2">Health history</h3><span class="spacer"></span></div>
     <div class="lq-list">
       <div class="lq-row"><span class="lq-row-k">tracking since</span>
         <span class="lq-row-v">${esc(h.since || '—')}</span></div>
@@ -222,10 +243,10 @@ function paint() {
 
     setStat('lq-fan-cpu', f.cpuRpm ?? '—');
     setStat('lq-fan-gpu', f.gpuRpm ?? '—');
-    setStat('lq-net-rx', fmtRate(io.netRxPerS));
-    setStat('lq-net-tx', fmtRate(io.netTxPerS));
-    setStat('lq-dsk-r', fmtRate(io.diskReadPerS));
-    setStat('lq-dsk-w', fmtRate(io.diskWritePerS));
+    setRate('lq-net-rx', io.netRxPerS);
+    setRate('lq-net-tx', io.netTxPerS);
+    setRate('lq-dsk-r', io.diskReadPerS);
+    setRate('lq-dsk-w', io.diskWritePerS);
 
     const grid = $('#lq-cores');
     if (grid) {
