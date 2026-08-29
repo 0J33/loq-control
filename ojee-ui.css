@@ -1089,7 +1089,10 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
    PROGRESS / METERS
    ============================================================ */
 .bar { height: 4px; background: var(--line-2); position: relative; overflow: hidden; }
-.bar .fill { height: 100%; background: var(--accent); box-shadow: 0 0 10px var(--glow); transition: width 0.4s; }
+/* `display: block` matters: the fill is written as a <span>, and width and
+   height do not apply to an inline box — so the bar rendered as an empty
+   track wherever the markup used spans. */
+.bar .fill { display: block; height: 100%; background: var(--accent); box-shadow: 0 0 10px var(--glow); transition: width 0.4s; }
 .bar .fill--warn { background: var(--warn); box-shadow: 0 0 10px var(--glow-warn); }
 .bar .fill--err  { background: var(--err);  box-shadow: 0 0 10px var(--glow-err); }
 
