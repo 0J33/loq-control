@@ -23,15 +23,6 @@
    that setStat() toggles. */
 .lq-stat { min-width: 0; }
 
-/* The heat band setStat() sets. It had no rule at all, so every threshold
-   this module computes — CPU at 85/95, GPU at 80/88 — changed nothing on
-   screen. Same two steps agent's tiles use, on the value only: the number
-   is what crossed the threshold, so the number is what changes colour. */
-.lq-stat[data-heat="warn"] .value { color: var(--warn); }
-.lq-stat[data-heat="hot"]  .value { color: var(--err); }
-.lq-stat[data-heat="warn"] { border-color: var(--warn); }
-.lq-stat[data-heat="hot"]  { border-color: var(--err); }
-
 /* ---------- core grid ---------- */
 .lq-cores {
   display: grid;
@@ -121,15 +112,6 @@
 .lq-proc .lq-p-lock { color: var(--dim); font-size: 0.6rem; }
 
 /* ---------- misc ---------- */
-.lq-list { display: flex; flex-direction: column; gap: 2px; }
-.lq-row {
-  display: flex; align-items: center; gap: var(--s-3);
-  padding: 9px 13px; background: var(--panel); border: 1px solid var(--line-2);
-}
-.lq-row .lq-row-k { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em;
-                    text-transform: uppercase; color: var(--ink); }
-.lq-row .lq-row-v { margin-left: auto; font-family: var(--mono); font-size: 0.7rem;
-                    color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 .lq-off { display: flex; gap: 10px; align-items: center; padding: 12px 14px;
           background: var(--panel); border: 1px dashed var(--line-strong); }
@@ -147,9 +129,7 @@
   .lq-proc-wrap { max-height: none; overflow: visible; }
 }
 
-/* A tile whose sub-line is a graph — same four parts as a stat tile, so a
-   chart reads as a readout that happens to have a trace. `.lq-sparkwrap`
-   and `.lq-sparkhead` were a private head/body pair that matched nothing. */
-.lq-chart { display: flex; flex-direction: column; gap: 6px; }
-.lq-chart .value { font-size: 1.05rem; }
-.lq-chart .lq-spark { margin-top: 2px; }
+/* The chart card, the list row and the threshold states all moved into
+   ojee-ui (.chartcard, .listrow, .is-warn/.is-err) once agent turned out to
+   have grown its own copy of each. Only the trace's own spacing is local. */
+.chartcard .lq-spark { margin-top: 2px; }

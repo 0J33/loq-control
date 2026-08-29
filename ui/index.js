@@ -103,8 +103,11 @@ function setStat(id, v, sub, band) {
     if (s && s.textContent !== String(sub)) s.textContent = sub;
   }
   if (band !== undefined) {
-    if (band) el.setAttribute('data-heat', band);
-    else el.removeAttribute('data-heat');
+    // `.is-warn` / `.is-err`, the design system's spelling. This module
+    // used data-heat="warn|hot", which nothing else in the console
+    // understood — and which had no CSS at all until recently.
+    el.classList.remove('is-warn', 'is-err');
+    if (band) el.classList.add(band === 'hot' ? 'is-err' : 'is-warn');
   }
 }
 
@@ -118,7 +121,7 @@ function setRate(id, bps) {
 }
 
 function sparkline(id, label, unit) {
-  return `<div class="panel lq-chart">
+  return `<div class="panel chartcard">
     <span class="label">${esc(label)}</span>
     <span class="value"><span id="${id}-now">—</span><sup style="font-size:0.9rem">${esc(unit)}</sup></span>
     <svg class="lq-spark" id="${id}" viewBox="0 0 300 46" preserveAspectRatio="none"
@@ -202,21 +205,21 @@ function viewBattery() {
       ${stat('lq-bat-health', 'health', '—', '%')}
       ${stat('lq-bat-cycles', 'cycles', '—')}
     </div>
-    <div class="lq-row">
-      <span class="lq-row-k">Conservation mode</span>
+    <div class="listrow">
+      <span class="listrow-name">Conservation mode</span>
       <span class="meta">caps charging at ~80% to extend pack life</span>
-      <span class="lq-row-v">${snap?.state?.conservation ? 'ON' : 'OFF'}</span>
+      <span class="listrow-v">${snap?.state?.conservation ? 'ON' : 'OFF'}</span>
     </div>
     ${h ? `<div class="section-head"><span class="idx">B.1</span><h3 class="h2">Health history</h3><span class="spacer"></span></div>
-    <div class="lq-list">
-      <div class="lq-row"><span class="lq-row-k">tracking since</span>
-        <span class="lq-row-v">${esc(h.since || '—')}</span></div>
-      <div class="lq-row"><span class="lq-row-k">first reading</span>
-        <span class="lq-row-v">${esc(h.first_h ?? '—')}%</span></div>
-      <div class="lq-row"><span class="lq-row-k">latest reading</span>
-        <span class="lq-row-v">${esc(h.cur_h ?? '—')}%</span></div>
-      <div class="lq-row"><span class="lq-row-k">samples</span>
-        <span class="lq-row-v">${esc(h.n ?? 0)}</span></div>
+    <div class="panel">
+      <div class="listrow"><span class="listrow-name">tracking since</span>
+        <span class="listrow-v">${esc(h.since || '—')}</span></div>
+      <div class="listrow"><span class="listrow-name">first reading</span>
+        <span class="listrow-v">${esc(h.first_h ?? '—')}%</span></div>
+      <div class="listrow"><span class="listrow-name">latest reading</span>
+        <span class="listrow-v">${esc(h.cur_h ?? '—')}%</span></div>
+      <div class="listrow"><span class="listrow-name">samples</span>
+        <span class="listrow-v">${esc(h.n ?? 0)}</span></div>
     </div>` : ''}
   </div>`;
 }

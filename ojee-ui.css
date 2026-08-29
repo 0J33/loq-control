@@ -199,13 +199,8 @@
    scrollbars, overscroll gutter, form controls — dark too. */
 html {
   background-color: var(--bg-0);
-  background-image:
-    radial-gradient(1200px 800px at 70% 26%, var(--glow-faint), transparent 60%),
-    linear-gradient(180deg, var(--bg-0), var(--bg-1));
-  background-attachment: fixed;
   min-height: 100%;
   color-scheme: dark;
-  overscroll-behavior: none;
 }
 
 body {
@@ -215,7 +210,28 @@ body {
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  overscroll-behavior: none;
+  /* `contain`, not `none`, and only on the scrolling element. It stops
+     pull-to-refresh and scroll chaining just the same, without `none`'s
+     habit of freezing the document scroller on iOS Safari. */
+  overscroll-behavior-y: contain;
+}
+
+/* The page gradients live on their own fixed layer behind everything.
+   They used to be `background-attachment: fixed` on <html> — which is
+   unsupported on iOS Safari, where it promotes the root to a fixed
+   backing layer and can leave the document refusing to scroll at all.
+   A real fixed element paints identically on every browser and takes
+   the root out of the compositor's way. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--bg-0);
+  background-image:
+    radial-gradient(1200px 800px at 70% 26%, var(--glow-faint), transparent 60%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1));
 }
 
 ::selection { background: var(--accent); color: var(--on-accent); }
@@ -367,6 +383,11 @@ a:hover { color: var(--accent); }
 .btn--danger { background: transparent; color: var(--err); border-color: var(--err-line); }
 .btn--danger:hover { background: var(--err); color: var(--on-accent); border-color: var(--err); }
 
+/* Square, icon-only. The system had no such modifier, so a module that
+   needed one wrote its own and inherited none of the button's states. */
+.btn--icon { padding: 0; width: var(--hit); min-width: var(--hit); gap: 0; }
+.btn--icon.btn--sm { width: 30px; min-width: 30px; }
+
 /* Small buttons keep their drawn size but grow an invisible hit area
    out to --hit, so a 30px-tall chip is still a 44px touch target. */
 .btn--sm {
@@ -429,6 +450,7 @@ a:hover { color: var(--accent); }
 .dot--ok    { background: var(--ok);     box-shadow: 0 0 8px var(--ok); }
 .dot--live  { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s ease-in-out infinite; }
 .dot--warn  { background: var(--warn);   box-shadow: 0 0 8px var(--warn); }
+.dot--info  { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 .dot--err   { background: var(--err);    box-shadow: 0 0 8px var(--err); animation: pulse 0.8s ease-in-out infinite; }
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -1229,6 +1251,69 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
 
 .cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 2px; }
 
+/* List row — one entry inside a single .panel, separated by a hairline.
+   Distinct from .row above, which is a standalone bordered row: use .row
+   when each entry is its own surface, .listrow when a list of them shares
+   one panel. The second is what the activity log, the service list and the
+   quick-links list all are, and each had been rebuilding it locally. */
+.listrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-2);
+  text-decoration: none;
+  color: var(--ink-2);
+}
+.listrow:last-child { border-bottom: 0; }
+.listrow-ic { flex: none; display: inline-flex; color: var(--dim); }
+.listrow-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.listrow-name { color: var(--ink); font-size: 0.78rem; }
+/* Trailing value, for a key/value row. */
+.listrow-v {
+  margin-left: auto; flex: none;
+  font-family: var(--mono); font-size: 0.72rem; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+/* A row that goes somewhere. Hover is the only affordance a row this quiet
+   can carry, so it must be unambiguous. */
+.listrow--go { cursor: pointer; }
+.listrow--go:hover .listrow-name,
+.listrow--go:hover .listrow-ic { color: var(--accent); }
+
+/* ============================================================
+   CHART CARD
+   ============================================================
+   A stat tile whose sub-line is a trace: LABEL, the reading, the graph,
+   then a legend. Same four parts as .stat, so a chart reads as a readout
+   that happens to have a graph rather than as a different kind of box —
+   which is exactly how the modules' private versions of this drifted. */
+.chartcard { display: flex; flex-direction: column; gap: 6px; }
+.chartcard .value { font-size: 1.05rem; }
+.chartcard svg { width: 100%; height: 40px; display: block; margin: 4px 0; }
+.chartcard-sep { color: var(--dim); margin: 0 8px; }
+.chartcard .meta { display: flex; align-items: center; gap: 6px; }
+.chartcard .meta .dot { width: 6px; height: 6px; box-shadow: none; }
+.chartcard .meta .dot + span { margin-right: 4px; }
+
+/* Threshold tag beside a value — a temperature next to a percentage, say.
+   Coloured by ITS OWN threshold, never by the value it sits beside: a CPU
+   at 15% on a 72°C die must not render the 15 in warning yellow. */
+.vtag {
+  font-family: var(--hud); font-size: 0.6rem; letter-spacing: 0.12em;
+  color: var(--dim); margin-left: 8px; vertical-align: 0.35em;
+}
+.vtag--warn { color: var(--warn); }
+.vtag--err  { color: var(--err); }
+
+/* Threshold state on a readout tile. One spelling for all of them: agent
+   used .is-warn, LOQ used [data-heat="warn"], and the desktop app had no
+   mechanism at all, so its thresholds changed nothing on screen. */
+.stat.is-warn .value, .is-warn > .stat .value { color: var(--warn); }
+.stat.is-err  .value, .is-err  > .stat .value { color: var(--err); }
+.panel.is-warn { border-color: var(--warn); }
+.panel.is-err  { border-color: var(--err); }
+
 /* Log line — timestamped activity entry. */
 .logline {
   display: flex; align-items: baseline; gap: 12px;
@@ -1330,7 +1415,18 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
   pointer-events: auto;
   transition: opacity var(--dur-2);
 }
+.toast .dot { flex: none; align-self: flex-start; margin-top: 5px; }
+.toast-txt { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.toast-txt span { overflow-wrap: anywhere; }
 .toast b { color: var(--ink); text-transform: uppercase; letter-spacing: 1px; font-size: 0.65rem; }
+.toast-x {
+  flex: none; align-self: flex-start;
+  background: none; border: 0; cursor: pointer; padding: 0;
+  width: 20px; height: 20px; line-height: 1;
+  font-family: var(--mono); font-size: 1rem; color: var(--dim);
+}
+.toast-x:hover { color: var(--ink); }
+.toast-x:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .toast--ok   { border-left-color: var(--ok); }
 .toast--warn { border-left-color: var(--warn); }
 .toast--err  { border-left-color: var(--err); }
@@ -1680,10 +1776,23 @@ body.app .nav    { position: sticky; top: calc(var(--hud-h) + env(safe-area-inse
   border: 1px solid transparent;
 }
 .cp-item .ic { color: var(--dim); flex: none; }
+/* The console labels every destination in uppercase letterspaced mono — the
+   nav, the tab bar, the status bar, every chip. The palette was the one
+   surface in sentence case, which is why it read as a borrowed component. */
 .cp-item .cp-label {
-  font-family: var(--mono); font-size: 0.76rem;
+  font-family: var(--mono); font-size: 0.72rem;
+  text-transform: uppercase; letter-spacing: 0.1em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* Group header: the same indexed-section idiom the module views open with. */
+.cp-group {
+  font-family: var(--hud); font-size: 0.58rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--accent);
+  padding: 14px 10px 6px; border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.cp-list > .cp-group:first-child { padding-top: 4px; }
 .cp-item .cp-hint {
   margin-left: auto; flex: none;
   font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim);
