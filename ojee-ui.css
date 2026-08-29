@@ -386,7 +386,14 @@ a:hover { color: var(--accent); }
 /* Square, icon-only. The system had no such modifier, so a module that
    needed one wrote its own and inherited none of the button's states. */
 .btn--icon { padding: 0; width: var(--hit); min-width: var(--hit); gap: 0; }
-.btn--icon.btn--sm { width: 30px; min-width: 30px; }
+/* Both padding declarations have the same specificity, so the one later in
+   the file wins — and .btn--sm is defined below. Without repeating it here
+   an icon button kept .btn--sm's 14px side padding inside a 30px box, which
+   left 2px for the glyph and rendered the button as an empty square. */
+.btn--icon.btn--sm { width: 30px; min-width: 30px; padding: 0; }
+/* An icon is a fixed-size replaced element; it must not be a shrinkable
+   flex item or a tight button squeezes it to nothing. */
+.btn--icon > svg { flex: none; }
 
 /* Small buttons keep their drawn size but grow an invisible hit area
    out to --hit, so a 30px-tall chip is still a 44px touch target. */
@@ -399,6 +406,13 @@ a:hover { color: var(--accent); }
   position: absolute; left: 0; right: 0;
   top: 50%; transform: translateY(-50%);
   min-height: var(--hit); height: 100%;
+}
+/* A square icon button is narrow in BOTH axes, so extending only the height
+   left it 30px wide — under the touch minimum on the one axis that matters
+   most for a row of them. This grows the hit area horizontally too. */
+.btn--icon.btn--sm::after {
+  left: 50%; right: auto; transform: translate(-50%, -50%);
+  min-width: var(--hit); width: 100%;
 }
 
 .btn:disabled, .btn--disabled {
